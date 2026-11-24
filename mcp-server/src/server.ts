@@ -8,7 +8,7 @@ import { HearthConfig, HearthToolbox, VALID_CATEGORIES } from "./tools.js";
 export function loadConfigFromEnv(): HearthConfig {
   const rpcUrl = process.env.HEARTH_RPC_URL ?? "http://127.0.0.1:26657";
   const chainId = process.env.HEARTH_CHAIN_ID ?? "dev";
-  const realmPath = process.env.HEARTH_REALM_PATH ?? "gno.land/r/hearth/hearthbounty/v0";
+  const realmPath = process.env.HEARTH_REALM_PATH ?? "gno.land/r/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthbounty/v0";
   const gnowebBaseUrl = process.env.HEARTH_GNOWEB_URL ?? "http://127.0.0.1:8888";
   return { rpcUrl, chainId, realmPath, gnowebBaseUrl };
 }

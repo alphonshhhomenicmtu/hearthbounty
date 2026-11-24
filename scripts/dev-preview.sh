@@ -16,9 +16,12 @@ fi
 
 mkdir -p "$DEV_HOME"
 
+ACTIVE_NS="$(grep -E '^module\s*=' "$ROOT_DIR"/r/*/hearthbounty/v0/gnomod.toml | head -n 1 | sed -E 's/.*"gno\.land\/r\/([^/]+)\/hearthbounty\/v0".*/\1/')"
+ACTIVE_NS="${ACTIVE_NS:-g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4}"
+
 echo "Starting local gnodev for HearthBounty..."
 echo "  RPC:    http://127.0.0.1:${PORT_RPC}"
-echo "  gnoweb: http://127.0.0.1:${PORT_WEB}/r/hearth/hearthbounty/v0"
+echo "  gnoweb: http://127.0.0.1:${PORT_WEB}/r/${ACTIVE_NS}/hearthbounty/v0"
 
 cd "$ROOT_DIR"
 exec "$GNO_DEV_BIN" local \
@@ -26,5 +29,5 @@ exec "$GNO_DEV_BIN" local \
   -home "$DEV_HOME" \
   -node-rpc-listener "127.0.0.1:${PORT_RPC}" \
   -web-listener "127.0.0.1:${PORT_WEB}" \
-  -web-home "/r/hearth/hearthbounty/v0" \
+  -web-home "/r/${ACTIVE_NS}/hearthbounty/v0" \
   -no-watch

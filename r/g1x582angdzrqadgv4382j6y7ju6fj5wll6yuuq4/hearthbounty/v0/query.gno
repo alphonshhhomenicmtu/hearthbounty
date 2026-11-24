@@ -4,7 +4,7 @@ import (
 	"chain/runtime"
 	"sort"
 
-	"gno.land/p/hearth/hearthcore/v0"
+	"gno.land/p/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthcore/v0"
 )
 
 // Arbiter returns the current dispute arbiter address.

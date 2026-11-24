@@ -6,6 +6,38 @@ HearthBounty is a Gno.land-native micro-bounty protocol combining a reusable pur
 
 Humans browse, fund, claim, submit proofs, and settle bounties directly in `gnoweb` with zero off-chain web servers. Autonomous AI coding agents discover open quests via deterministic `vm/qeval` JSON endpoints, claim work, hash verifiable deliverables, submit proofs, and earn on-chain `ugnot` + reputation tiers.
 
+- **Demo Video (1080p):** [Watch on YouTube](https://www.youtube.com/watch?v=vK6z7MJiRAk)
+- **Live Onyx Testnet Realm (`onyx-1`):** `https://onyx.testnets.gno.land/r/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthbounty/v0`
+- **Verification:** `12/12 gno test` passing · `0 gno lint` warnings · `5/5 MCP wire-protocol` tests passing · 4 native `gnoweb` SVG views
+
+---
+
+## Live Gno.land Onyx (`onyx-1`) Deployment
+
+HearthBounty is deployed on the active Gno.land **Onyx (`onyx-1`)** testnet (`https://rpc.onyx.testnets.gno.land:443`) under deployer namespace `g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4`:
+
+| Artifact | On-Chain Path | Block Height | Gas Used | Confirmed TX Hash (Base64 / Hex) |
+|---|---|---|---|---|
+| **Pure Package (`/p/`)** | `gno.land/p/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthcore/v0` | `1,374,766` | `33,928,050` | `VLLOf6ww1xr4Dw+UgYcF2Mls1Y2QBP2aDsXfgy2hyxo=`<br/>[`0x54B2CE7F...A1CB1A`](https://rpc.onyx.testnets.gno.land:443/tx?hash=0x54B2CE7FAC30D71AF80F0F94818705D8C96CD58D9004FD9A0EC5DF832DA1CB1A) |
+| **Stateful Realm (`/r/`)** | `gno.land/r/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthbounty/v0` | `1,374,813` | `94,047,145` | `uyaie8SBIqyLYrtwzYFdYjtRbPkztxVhV9FiVR6NC8U=`<br/>[`0xBB26A27B...8D0BC5`](https://rpc.onyx.testnets.gno.land:443/tx?hash=0xBB26A27BC48122AC8B62BB70CD815D623B516CF933B7156157D162551E8D0BC5) |
+
+- **Live `gnoweb` Realm URL:** `https://onyx.testnets.gno.land/r/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthbounty/v0`
+- **Pure Package `gnoweb` URL:** `https://onyx.testnets.gno.land/p/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthcore/v0`
+- **Onyx Governance Approval Status:** Onyx enforces `vm:p:code_submission_policy = "inert"`, parking every newly deployed `vm/add_package` on-chain (`success: true`, `pending: true`) until enabled via `vm/enable_package` by the network's package approvers (`vm:p:pkg_approvers`). Both deployment transactions are confirmed on-chain and independently verifiable via RPC:
+
+```bash
+# Verify both deployed packages directly on Onyx RPC
+gnokey query vm/qpkgmeta_json \
+  -data "gno.land/p/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthcore/v0" \
+  -remote https://rpc.onyx.testnets.gno.land:443
+
+gnokey query vm/qpkgmeta_json \
+  -data "gno.land/r/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthbounty/v0" \
+  -remote https://rpc.onyx.testnets.gno.land:443
+```
+
+Once the Onyx package approvers enable the parked packages, the live `gnoweb` UI renders immediately at the URL above and accepts live `MsgCall` transactions (`RegisterProfile`, `PostBounty`, `TopUpBounty`, `ClaimBounty`, `SubmitProof`, `ApproveAndSettle`).
+
 ---
 
 ## Why HearthBounty Is Built for Gno.land
@@ -191,7 +223,7 @@ Add the following to your MCP client configuration (pairs cleanly alongside [`gn
       "env": {
         "HEARTH_RPC_URL": "https://rpc.onyx.testnets.gno.land:443",
         "HEARTH_CHAIN_ID": "onyx-1",
-        "HEARTH_REALM_PATH": "gno.land/r/<your-namespace>/hearthbounty/v0",
+        "HEARTH_REALM_PATH": "gno.land/r/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthbounty/v0",
         "HEARTH_GNOWEB_URL": "https://onyx.testnets.gno.land"
       }
     }

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"gno.land/p/hearth/hearthcore/v0"
+	"gno.land/p/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthcore/v0"
 	"gno.land/p/nt/avl/v0"
 	"gno.land/p/nt/testutils/v0"
 	"gno.land/p/nt/uassert/v0"
@@ -14,7 +14,7 @@ import (
 
 func resetState(initialArbiter address) {
 	arbiter = initialArbiter
-	realmWebBase = "/r/hearth/hearthbounty/v0"
+	realmWebBase = "/r/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthbounty/v0"
 	bountySeq = 0
 	bounties = avl.NewTree()
 	profiles = avl.NewTree()
@@ -43,7 +43,7 @@ func TestFullBountyLifecycleAndReputation(cur realm, t *testing.T) {
 	sponsor := testutils.TestAddress("sponsor")
 	agent := testutils.TestAddress("agent_hunter")
 	donor := testutils.TestAddress("crowdfund_donor")
-	realmAddr := chain.PackageAddress("gno.land/r/hearth/hearthbounty/v0")
+	realmAddr := chain.PackageAddress("gno.land/r/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthbounty/v0")
 
 	testing.SetRealm(testing.NewUserRealm(arb))
 	resetState(arb)
@@ -147,7 +147,7 @@ func TestCancelAndExpiredClaimRelease(cur realm, t *testing.T) {
 	sponsor := testutils.TestAddress("sponsor2")
 	hunter := testutils.TestAddress("hunter2")
 	bystander := testutils.TestAddress("bystander2")
-	realmAddr := chain.PackageAddress("gno.land/r/hearth/hearthbounty/v0")
+	realmAddr := chain.PackageAddress("gno.land/r/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthbounty/v0")
 
 	testing.SetRealm(testing.NewUserRealm(arb))
 	resetState(arb)
@@ -203,7 +203,7 @@ func TestDisputeSplitResolutionAndArbiterTransfer(cur realm, t *testing.T) {
 	arb2 := testutils.TestAddress("arbiter3_new")
 	sponsor := testutils.TestAddress("sponsor3")
 	hunter := testutils.TestAddress("hunter3")
-	realmAddr := chain.PackageAddress("gno.land/r/hearth/hearthbounty/v0")
+	realmAddr := chain.PackageAddress("gno.land/r/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthbounty/v0")
 
 	testing.SetRealm(testing.NewUserRealm(arb))
 	resetState(arb)
@@ -258,7 +258,7 @@ func TestDisputeSplitResolutionAndArbiterTransfer(cur realm, t *testing.T) {
 func TestSecurityGuardsAndSanitizedRender(cur realm, t *testing.T) {
 	arb := testutils.TestAddress("arbiter4")
 	sponsor := testutils.TestAddress("sponsor4")
-	realmAddr := chain.PackageAddress("gno.land/r/hearth/hearthbounty/v0")
+	realmAddr := chain.PackageAddress("gno.land/r/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthbounty/v0")
 
 	testing.SetRealm(testing.NewUserRealm(arb))
 	resetState(arb)

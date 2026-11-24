@@ -2,6 +2,7 @@
 .tools/
 .gnodev/
 gno-dev-data/
+demo-video/
 
 # Node / TypeScript
 node_modules/

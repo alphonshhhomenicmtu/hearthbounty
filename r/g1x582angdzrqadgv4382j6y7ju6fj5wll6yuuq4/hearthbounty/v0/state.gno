@@ -6,7 +6,7 @@ package hearthbounty
 import (
 	"strings"
 
-	"gno.land/p/hearth/hearthcore/v0"
+	"gno.land/p/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthcore/v0"
 	"gno.land/p/nt/avl/v0"
 	"gno.land/p/nt/mux/v0"
 	"gno.land/p/nt/seqid/v0"
@@ -162,7 +162,7 @@ func init(cur realm) {
 func deriveWebBase(pkgPath string) string {
 	idx := strings.Index(pkgPath, "/")
 	if idx == -1 {
-		return "/r/hearth/hearthbounty/v0"
+		return "/r/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthbounty/v0"
 	}
 	return pkgPath[idx:]
 }

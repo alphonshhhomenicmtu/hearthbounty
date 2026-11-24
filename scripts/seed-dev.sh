@@ -10,7 +10,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GNOKEY_BIN="${GNOKEY_BIN:-$(command -v gnokey || echo "$ROOT_DIR/.tools/bin/gnokey")}"
 RPC_URL="${HEARTH_RPC_URL:-http://127.0.0.1:26657}"
 CHAIN_ID="${HEARTH_CHAIN_ID:-dev}"
-REALM_PATH="${HEARTH_REALM_PATH:-gno.land/r/hearth/hearthbounty/v0}"
+ACTIVE_NS="$(grep -E '^module\s*=' "$ROOT_DIR"/r/*/hearthbounty/v0/gnomod.toml | head -n 1 | sed -E 's/.*"gno\.land\/r\/([^/]+)\/hearthbounty\/v0".*/\1/')"
+REALM_PATH="${HEARTH_REALM_PATH:-gno.land/r/${ACTIVE_NS:-g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4}/hearthbounty/v0}"
 DEV_HOME="$ROOT_DIR/.tools/dev-keys"
 
 # Public Gno.land gnodev test1 mnemonic (well-known non-secret local devnet fixture).

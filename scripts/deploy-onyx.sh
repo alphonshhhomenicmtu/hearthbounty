@@ -13,8 +13,8 @@ GNOKEY_BIN="${GNOKEY_BIN:-$(command -v gnokey || echo "$ROOT_DIR/.tools/bin/gnok
 CHAIN_ID="${GNO_CHAIN_ID:-onyx-1}"
 RPC_URL="${GNO_RPC_URL:-https://rpc.onyx.testnets.gno.land:443}"
 GNOWEB_URL="${GNO_GNOWEB_URL:-https://onyx.testnets.gno.land}"
-GAS_FEE="${GNO_GAS_FEE:-20000ugnot}"
-GAS_WANTED="${GNO_GAS_WANTED:-20000000}"
+GAS_FEE="${GNO_GAS_FEE:-150000ugnot}"
+GAS_WANTED="${GNO_GAS_WANTED:-120000000}"
 MAX_DEPOSIT="${GNO_MAX_DEPOSIT:-50000000ugnot}"
 KEY_NAME="${GNO_KEY_NAME:-}"
 NAMESPACE="${GNO_NAMESPACE:-}"
@@ -54,16 +54,36 @@ echo "==> [3/6] Running local Gno tests and lint before broadcast"
 (cd "$ROOT_DIR" && "$GNO_BIN" test ./p/... ./r/... && "$GNO_BIN" lint ./p/... ./r/...)
 
 echo "==> [4/6] Deploying pure package: $PKG_CORE"
-"$GNOKEY_BIN" maketx addpkg \
-  -pkgpath "$PKG_CORE" \
-  -pkgdir "$ROOT_DIR/p/${ACTIVE_NS}/hearthcore/v0" \
-  -max-deposit "$MAX_DEPOSIT" \
-  -gas-fee "$GAS_FEE" \
-  -gas-wanted "$GAS_WANTED" \
-  -chainid "$CHAIN_ID" \
-  -remote "$RPC_URL" \
-  -broadcast \
-  "$KEY_NAME"
+run_addpkg() {
+  local pkgpath="$1"
+  local pkgdir="$2"
+  if [[ "${GNO_INSECURE_PASSWORD_STDIN:-0}" == "1" ]]; then
+    printf "\n" | "$GNOKEY_BIN" maketx addpkg \
+      -pkgpath "$pkgpath" \
+      -pkgdir "$pkgdir" \
+      -max-deposit "$MAX_DEPOSIT" \
+      -gas-fee "$GAS_FEE" \
+      -gas-wanted "$GAS_WANTED" \
+      -chainid "$CHAIN_ID" \
+      -remote "$RPC_URL" \
+      -insecure-password-stdin \
+      -broadcast \
+      "$KEY_NAME"
+  else
+    "$GNOKEY_BIN" maketx addpkg \
+      -pkgpath "$pkgpath" \
+      -pkgdir "$pkgdir" \
+      -max-deposit "$MAX_DEPOSIT" \
+      -gas-fee "$GAS_FEE" \
+      -gas-wanted "$GAS_WANTED" \
+      -chainid "$CHAIN_ID" \
+      -remote "$RPC_URL" \
+      -broadcast \
+      "$KEY_NAME"
+  fi
+}
+
+run_addpkg "$PKG_CORE" "$ROOT_DIR/p/${ACTIVE_NS}/hearthcore/v0"
 
 echo "==> Waiting for $PKG_CORE to transition from inert to live..."
 for _ in $(seq 1 30); do
@@ -76,16 +96,7 @@ for _ in $(seq 1 30); do
 done
 
 echo "==> [5/6] Deploying stateful realm: $PKG_BOARD"
-"$GNOKEY_BIN" maketx addpkg \
-  -pkgpath "$PKG_BOARD" \
-  -pkgdir "$ROOT_DIR/r/${ACTIVE_NS}/hearthbounty/v0" \
-  -max-deposit "$MAX_DEPOSIT" \
-  -gas-fee "$GAS_FEE" \
-  -gas-wanted "$GAS_WANTED" \
-  -chainid "$CHAIN_ID" \
-  -remote "$RPC_URL" \
-  -broadcast \
-  "$KEY_NAME"
+run_addpkg "$PKG_BOARD" "$ROOT_DIR/r/${ACTIVE_NS}/hearthbounty/v0"
 
 echo "==> [6/6] Verifying live status & Render() on $CHAIN_ID"
 for _ in $(seq 1 30); do
