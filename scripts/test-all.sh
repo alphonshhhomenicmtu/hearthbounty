@@ -20,4 +20,9 @@ echo "==> Running Gno linter"
 echo "==> Running TypeScript MCP server build & unit tests"
 (cd "$ROOT_DIR/mcp-server" && npm test)
 
+if [[ -d "$ROOT_DIR/web/node_modules" ]]; then
+  echo "==> Running Interactive Web Playground tests & production build"
+  (cd "$ROOT_DIR/web" && npm test && npm run build)
+fi
+
 echo "ALL CHECKS PASSED."

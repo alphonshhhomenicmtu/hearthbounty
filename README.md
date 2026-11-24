@@ -6,9 +6,25 @@ HearthBounty is a Gno.land-native micro-bounty protocol combining a reusable pur
 
 Humans browse, fund, claim, submit proofs, and settle bounties directly in `gnoweb` with zero off-chain web servers. Autonomous AI coding agents discover open quests via deterministic `vm/qeval` JSON endpoints, claim work, hash verifiable deliverables, submit proofs, and earn on-chain `ugnot` + reputation tiers.
 
-- **Demo Video (1080p):** [Watch on YouTube](https://www.youtube.com/watch?v=vK6z7MJiRAk)
+- **Interactive Web Playground & Live Onyx Explorer (Zero Install):** [Launch Playground](https://alphonshhhomenicmtu.github.io/hearthbounty/) · [Run `/diag` Self-Test](https://alphonshhhomenicmtu.github.io/hearthbounty/#/diag)
+- **10-Slide Pitch Deck (PDF):** [`docs/hearthbounty-deck.pdf`](docs/hearthbounty-deck.pdf) · [Direct PDF View](https://alphonshhhomenicmtu.github.io/hearthbounty/hearthbounty-deck.pdf)
+- **Demo Video (1080p):** [Watch on YouTube](https://youtu.be/vK6z7MJiRAk)
 - **Live Onyx Testnet Realm (`onyx-1`):** `https://onyx.testnets.gno.land/r/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthbounty/v0`
-- **Verification:** `12/12 gno test` passing · `0 gno lint` warnings · `5/5 MCP wire-protocol` tests passing · 4 native `gnoweb` SVG views
+- **Live Pure Package (`onyx-1`):** `https://onyx.testnets.gno.land/p/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthcore/v0`
+- **Verification:** `12/12 gno test` passing · `0 gno lint` warnings · `5/5 MCP wire-protocol` tests passing · `4/4 web playground` unit tests + live browser `/diag` checks · 4 native `gnoweb` SVG views
+
+---
+
+## Live Interactive Playground & Pitch Deck (V2)
+
+Judges and developers can inspect the live Onyx deployment and exercise the full escrow state machine directly in the browser with zero local setup:
+
+- **Live Web Playground:** [`https://alphonshhhomenicmtu.github.io/hearthbounty/`](https://alphonshhhomenicmtu.github.io/hearthbounty/)
+  - **Live Onyx (`onyx-1`) Explorer:** Queries `https://rpc.onyx.testnets.gno.land:443` directly from the browser for real-time block height, `vm/qpkgmeta_json` package status, and verified deployment TX proofs (`hearthcore/v0` Block `1,374,766` and `hearthbounty/v0` Block `1,374,813`).
+  - **Interactive Escrow State Machine:** Mirrors all 12 Gno crossing entrypoints (`PostBounty`, `TopUpBounty`, `ClaimBounty`, `ReleaseExpiredClaim`, `SubmitProof` with SHA-256 hashing, `RequestRevision`, `ApproveAndSettle`, `CancelBounty`, `OpenDispute`, `ResolveDispute` with live basis-point slider), plus adversarial Interrealm v2 guard testing (`AssertOriginCall` / wrong-denom rejection) and live CEI bank balance invariant tracking.
+  - **Live MCP Tool Call Inspector:** Exercises all 10 `hearthbounty-mcp` tools, runs a one-click autonomous agent loop, generates `gnomcp` + `gnokey` payloads, and lets judges test the `gnoland-1` mainnet write-safety block.
+  - **60-Second Judge Walkthrough & `/diag` Self-Test:** Guided 5-step drawer plus automated [`/diag`](https://alphonshhhomenicmtu.github.io/hearthbounty/#/diag) diagnostics verifying math conservation, security guards, sanitizer defenses, and live Onyx TX proofs.
+- **10-Slide Technical Pitch Deck:** [`docs/hearthbounty-deck.pdf`](docs/hearthbounty-deck.pdf) covering problem/solution, `/p/` + `/r/` architecture, escrow conservation math, 7 Interrealm v2 security invariants, live `gnoweb` screenshots, 10-tool MCP workflow, Onyx proofs, and the 6-month mainnet retention roadmap.
 
 ---
 
@@ -23,7 +39,7 @@ HearthBounty is deployed on the active Gno.land **Onyx (`onyx-1`)** testnet (`ht
 
 - **Live `gnoweb` Realm URL:** `https://onyx.testnets.gno.land/r/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthbounty/v0`
 - **Pure Package `gnoweb` URL:** `https://onyx.testnets.gno.land/p/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthcore/v0`
-- **Onyx Governance Approval Status:** Onyx enforces `vm:p:code_submission_policy = "inert"`, parking every newly deployed `vm/add_package` on-chain (`success: true`, `pending: true`) until enabled via `vm/enable_package` by the network's package approvers (`vm:p:pkg_approvers`). Both deployment transactions are confirmed on-chain and independently verifiable via RPC:
+- **Onyx Governance Approval Status:** Onyx enforces `vm:p:code_submission_policy = "inert"`. The pure package `hearthcore/v0` (Block `1,374,766`) is already **`status: "live"`** on Onyx. The stateful realm `hearthbounty/v0` (Block `1,374,813`) is confirmed on-chain (`pending: true`) awaiting `vm/enable_package` by the network's package approvers (`vm:p:pkg_approvers`). Both deployment transactions are confirmed on-chain and independently verifiable via RPC:
 
 ```bash
 # Verify both deployed packages directly on Onyx RPC
@@ -115,8 +131,19 @@ flowchart LR
 │   ├── src/server.ts                     # @modelcontextprotocol/sdk stdio MCP server
 │   ├── src/cli.ts                        # Developer & autonomous agent CLI
 │   └── test/mcp.test.ts                  # Unit + full MCP InMemoryTransport wire-protocol tests
+├── web/                                  # Zero-install Interactive Playground & Live Onyx Explorer
+│   ├── src/engine.ts                     # Exact TypeScript mirror of hearthcore/v0 + hearthbounty/v0
+│   ├── src/onyx.ts                       # Direct browser Onyx (onyx-1) RPC & TX proof client
+│   ├── src/mcp.ts                        # 10-tool MCP inspector & mainnet safety guard emulator
+│   ├── src/diag.ts                       # Built-in /diag self-test suite
+│   ├── src/main.ts                       # Interactive simulator, walkthrough drawer & UI views
+│   └── test/playground.test.ts           # Unit tests for state machine, MCP emulator & /diag
+├── docs/
+│   ├── hearthbounty-deck.pdf             # 10-slide technical pitch deck (16:9 vector PDF)
+│   └── screenshots/                      # Native gnoweb v1.8.0 rendered UI captures
 └── scripts/
-    ├── test-all.sh                       # Runs gno test, gno lint, tsc, and MCP tests
+    ├── test-all.sh                       # Runs gno test, gno lint, MCP tests, and web build/tests
+    ├── build-deck.mjs                    # Generates the 10-slide PDF pitch deck
     ├── dev-preview.sh                    # Starts local gnodev hosting HearthBounty
     ├── seed-dev.sh                       # Seeds realistic devnet bounties, proofs, and settlements
     ├── set-namespace.sh                  # Rewrites module paths for any Onyx address/handle

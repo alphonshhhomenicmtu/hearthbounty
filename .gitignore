@@ -8,6 +8,9 @@ demo-video/
 node_modules/
 mcp-server/node_modules/
 mcp-server/dist/
+web/node_modules/
+web/dist/
+web/.test-dist/
 *.tsbuildinfo
 
 # OS / Editor
