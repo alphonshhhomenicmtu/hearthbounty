@@ -1,15 +1,23 @@
 /**
  * Exact TypeScript mirror of:
  *   - gno.land/p/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthcore/v0
- *   - gno.land/r/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthbounty/v0
+ *   - gno.land/r/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthbounty/v1
  *
- * Every constant, validation rule, basis-point split, tier threshold, CEI
- * balance transfer, security guard, and JSON export matches the Gno source.
+ * Mirrors V2.1 hardened escrow semantics:
+ *   - 1:1 ugnot-backed wugnot escrow via gno.land/r/nt/grc20reg/v0
+ *   - H-1 per-contributor AVL donor custody & claimant/donor wash guards
+ *   - M-1 ExpireSubmission, ExpireDispute (50/50), and arbiter conflict guard
+ *   - M-2 byte/code-unit ASCII-folding NeutralizeGnoTags immune to U+0130 'İ'
+ *   - HTTPS-only proof links, exact deadline block expiry, canonical realm_path
  */
 
 export const DENOM = "ugnot";
+export const ESCROW_TOKEN_KEY = "gno.land/r/gnoland/wugnot.wugnot";
 export const UGNOT_PER_GNOT = 1_000_000;
 export const MIN_REWARD_UGNOT = 100_000;
+export const MIN_TOPUP_UGNOT = 100_000;
+export const MAX_ESCROW_UGNOT = 1_000_000_000_000;
+export const MAX_EXTERNAL_DONORS = 20;
 export const MIN_DEADLINE_BLOCKS = 10;
 export const MAX_DEADLINE_BLOCKS = 2_000_000;
 export const DEFAULT_DEADLINE_BLOCKS = 50_000;
@@ -27,8 +35,12 @@ export const MAX_ENDPOINT_LEN = 240;
 
 export const DEPLOYER_NAMESPACE = "g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4";
 export const CORE_PKG_PATH = `gno.land/p/${DEPLOYER_NAMESPACE}/hearthcore/v0`;
-export const REALM_PKG_PATH = `gno.land/r/${DEPLOYER_NAMESPACE}/hearthbounty/v0`;
-export const REALM_WEB_BASE = `/r/${DEPLOYER_NAMESPACE}/hearthbounty/v0`;
+export const REALM_PKG_PATH = `gno.land/r/${DEPLOYER_NAMESPACE}/hearthbounty/v1`;
+export const REALM_WEB_BASE = `/r/${DEPLOYER_NAMESPACE}/hearthbounty/v1`;
+export const REALM_ESCROW_ADDRESS = "g1dkvpnfcp8saevy2g46x9z2ljyj9saez6akm39a";
+export const GUILD_PKG_PATH = `gno.land/r/${DEPLOYER_NAMESPACE}/hearthguild/v0`;
+export const GUILD_WEB_BASE = `/r/${DEPLOYER_NAMESPACE}/hearthguild/v0`;
+export const LEGACY_V0_PKG_PATH = `gno.land/r/${DEPLOYER_NAMESPACE}/hearthbounty/v0`;
 
 export const VALID_STATUSES = [
   "open",
@@ -73,6 +85,9 @@ export interface BountyRecord {
   claimNote: string;
   escrowUgnot: number;
   initialUgnot: number;
+  sponsorFundedUgnot: number;
+  externalTopUpUgnot: number;
+  donorShares: Record<string, number>;
   payoutUgnot: number;
   refundUgnot: number;
   topUpCount: number;
@@ -81,6 +96,9 @@ export interface BountyRecord {
   claimedHeight: number;
   deadlineHeight: number;
   submittedHeight: number;
+  reviewDeadlineHeight: number;
+  disputedHeight: number;
+  disputeDeadlineHeight: number;
   settledHeight: number;
   proofURL: string;
   proofDigest: string;
@@ -119,6 +137,9 @@ export interface ProfileView extends ProfileRecord {
 
 export interface BoardStats {
   realm_path: string;
+  web_path: string;
+  escrow_token: string;
+  escrow_address: string;
   arbiter: string;
   chain_height: number;
   total_bounties: number;
@@ -140,6 +161,7 @@ export interface CallContext {
   isOriginCall?: boolean;
   isUserCall?: boolean;
   sentCoins?: Array<{ denom: string; amount: number }>;
+  tokenKey?: string;
 }
 
 export interface TraceEntry {
@@ -201,7 +223,7 @@ export const DEMO_ACTORS: ActorPreset[] = [
   },
 ];
 
-// --- Pure functions mirroring hearthcore/v0/types.gno ---
+// --- Pure functions mirroring hearthcore/v0 + hearthbounty/v1/sanitize.gno ---
 
 export function computeTier(
   settledCount: number,
@@ -235,10 +257,6 @@ export function tierColor(tier: ReputationTier): string {
   }
 }
 
-/**
- * Exact integer conservation split using BigInt to mirror Gno's divide-first
- * int64 overflow-safe math: hunterUgnot + sponsorRefundUgnot === escrowUgnot.
- */
 export function computeSplit(
   escrowUgnot: number,
   hunterBps: number,
@@ -301,7 +319,25 @@ export function escapeMath(s: string): string {
   return s.replaceAll("$", "\\$");
 }
 
-export function neutralizeGnoTags(s: string): string {
+function asciiLowerCode(code: number): number {
+  return code >= 65 && code <= 90 ? code + 32 : code;
+}
+
+function hasAsciiPrefixFold(s: string, pos: number, pattern: string): boolean {
+  if (pos + pattern.length > s.length) return false;
+  for (let j = 0; j < pattern.length; j++) {
+    if (asciiLowerCode(s.charCodeAt(pos + j)) !== pattern.charCodeAt(j)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Legacy v0 algorithm preserved strictly for the Adversarial Breaker Lab
+ * before/after demonstration of the U+0130 ('İ') index-desync bug (M-2).
+ */
+export function legacyVulnerableNeutralizeGnoTagsV0(s: string): string {
   const lower = s.toLowerCase();
   if (!lower.includes("<gno-") && !lower.includes("</gno-")) {
     return s;
@@ -318,6 +354,30 @@ export function neutralizeGnoTags(s: string): string {
     out += s[i];
   }
   return out;
+}
+
+/**
+ * Patched V2.1 NeutralizeGnoTags mirroring hearthbounty/v1/sanitize.gno.
+ * Uses direct ASCII case folding on original indices so multi-unit Unicode
+ * expansions (such as U+0130 'İ' -> "i\u0307") never desync tag detection.
+ */
+export function neutralizeGnoTags(s: string): string {
+  let out = "";
+  let changed = false;
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === "<" && (hasAsciiPrefixFold(s, i, "<gno-") || hasAsciiPrefixFold(s, i, "</gno-"))) {
+      if (!changed) {
+        out = s.slice(0, i);
+        changed = true;
+      }
+      out += "&lt;";
+      continue;
+    }
+    if (changed) {
+      out += s[i];
+    }
+  }
+  return changed ? out : s;
 }
 
 export function sanitizeRenderText(s: string): string {
@@ -344,16 +404,18 @@ export function validateText(field: string, value: string, minLen: number, maxLe
 }
 
 export function validateProofURL(raw: string): string {
-  const trimmed = validateText("proof URL", raw, 8, MAX_URL_LEN);
-  if (
-    !trimmed.startsWith("https://") &&
-    !trimmed.startsWith("http://") &&
-    !trimmed.startsWith("ipfs://")
-  ) {
-    throw new Error("hearthcore: proof URL must start with https://, http://, or ipfs://");
+  const trimmed = raw.trim();
+  if (trimmed.length < 12) {
+    throw new Error("hearthbounty: proof URL is too short");
+  }
+  if (trimmed.length > MAX_URL_LEN) {
+    throw new Error("hearthbounty: proof URL exceeds maximum length");
+  }
+  if (!trimmed.startsWith("https://")) {
+    throw new Error("hearthbounty: proof URL must start with https://");
   }
   if (/[\s]/.test(trimmed)) {
-    throw new Error("hearthcore: proof URL must not contain whitespace");
+    throw new Error("hearthbounty: proof URL must not contain whitespace");
   }
   return trimmed;
 }
@@ -390,9 +452,6 @@ export function effectiveReward(b: BountyRecord): number {
   return b.initialUgnot;
 }
 
-/**
- * Pure SHA-256 hex digest using Web Crypto API (works in modern browsers & Node 20+).
- */
 export async function computeSha256Digest(content: string): Promise<string> {
   const bytes = new TextEncoder().encode(content);
   const hashBuffer = await globalThis.crypto.subtle.digest("SHA-256", bytes);
@@ -401,7 +460,7 @@ export async function computeSha256Digest(content: string): Promise<string> {
   return `sha256:${hex}`;
 }
 
-// --- Stateful Realm Engine mirroring hearthbounty/v0 ---
+// --- Stateful Realm Engine mirroring hearthbounty/v1 ---
 
 export class HearthBountyRealm {
   arbiter: string;
@@ -424,14 +483,14 @@ export class HearthBountyRealm {
   trace: TraceEntry[] = [];
   private traceSeq = 0;
 
-  constructor(initialArbiter = DEPLOYER_NAMESPACE, startHeight = 1_374_813) {
+  constructor(initialArbiter = DEPLOYER_NAMESPACE, startHeight = 1_378_958) {
     this.arbiter = initialArbiter;
     this.chainHeight = startHeight;
   }
 
   seedBalances(): void {
     for (const actor of DEMO_ACTORS) {
-      this.balances.set(actor.address, 250_000_000); // 250.00 GNOT each
+      this.balances.set(actor.address, 250_000_000); // 250.00 GNOT (1:1 wugnot) each
     }
   }
 
@@ -449,6 +508,12 @@ export class HearthBountyRealm {
 
   assertEscrowInvariant(): boolean {
     return this.realmBankUgnot === this.totalEscrowUgnot;
+  }
+
+  getDonorContribution(id: number, donor: string): number {
+    const b = this.bounties.get(id);
+    if (!b) return 0;
+    return b.donorShares[donor] ?? 0;
   }
 
   private getOrCreateProfile(addr: string): ProfileRecord {
@@ -473,6 +538,13 @@ export class HearthBountyRealm {
     };
     this.profiles.set(addr, created);
     return created;
+  }
+
+  private decrementSponsoredCredit(addr: string, amount: number): void {
+    if (amount <= 0) return;
+    const p = this.profiles.get(addr);
+    if (!p) return;
+    p.sponsoredUgnot = p.sponsoredUgnot >= amount ? p.sponsoredUgnot - amount : 0;
   }
 
   private displayHandle(addr: string): string {
@@ -546,21 +618,27 @@ export class HearthBountyRealm {
     }
   }
 
-  private requireSingleUgnotSend(ctx: CallContext, minAmount: number): number {
+  private requireWugnotEscrow(ctx: CallContext, minAmount: number): number {
+    if (ctx.tokenKey && ctx.tokenKey !== ESCROW_TOKEN_KEY) {
+      throw new Error("hearthbounty: only 1:1 ugnot-backed wugnot escrow is accepted");
+    }
     const sent = ctx.sentCoins ?? [];
     if (sent.length === 0) {
-      throw new Error("hearthbounty: must attach ugnot escrow coins");
+      throw new Error("hearthbounty: escrow amount is below minimum required (100000 wugnot)");
     }
-    if (sent.length !== 1 || sent[0].denom !== DENOM) {
-      throw new Error("hearthbounty: only ugnot coins are accepted");
+    if (sent.length !== 1 || (sent[0].denom !== DENOM && sent[0].denom !== "wugnot")) {
+      throw new Error("hearthbounty: only 1:1 ugnot-backed wugnot escrow is accepted");
     }
     const amt = sent[0].amount;
     if (!Number.isInteger(amt) || amt < minAmount) {
-      throw new Error("hearthbounty: attached ugnot is below minimum required amount");
+      throw new Error("hearthbounty: escrow amount is below minimum required (100000 wugnot)");
+    }
+    if (amt > MAX_ESCROW_UGNOT) {
+      throw new Error("hearthbounty: escrow amount exceeds single-bounty safety ceiling");
     }
     const bal = this.getBalance(ctx.caller);
     if (bal < amt) {
-      throw new Error("banker: insufficient ugnot balance for escrow deposit");
+      throw new Error("grc20reg: insufficient wugnot balance for escrow deposit");
     }
     return amt;
   }
@@ -573,7 +651,11 @@ export class HearthBountyRealm {
     this.balances.set(addr, this.getBalance(addr) - amount);
   }
 
-  private runGuarded<T>(func: string, caller: string, fn: () => { result: T; eventType: string; attrs: Record<string, string> }): T {
+  private runGuarded<T>(
+    func: string,
+    caller: string,
+    fn: () => { result: T; eventType: string; attrs: Record<string, string> },
+  ): T {
     try {
       const { result, eventType, attrs } = fn();
       this.chainHeight += 1;
@@ -645,7 +727,7 @@ export class HearthBountyRealm {
   ): number {
     return this.runGuarded("PostBounty", ctx.caller, () => {
       this.requireDirectEOA(ctx, "fund escrow");
-      const amount = this.requireSingleUgnotSend(ctx, MIN_REWARD_UGNOT);
+      const amount = this.requireWugnotEscrow(ctx, MIN_REWARD_UGNOT);
       const cleanTitle = validateText("title", title, 4, MAX_TITLE_LEN);
       const cleanSpec = validateText("spec", spec, 10, MAX_SPEC_LEN);
       const cat = parseCategory(category);
@@ -670,6 +752,9 @@ export class HearthBountyRealm {
         claimNote: "",
         escrowUgnot: amount,
         initialUgnot: amount,
+        sponsorFundedUgnot: amount,
+        externalTopUpUgnot: 0,
+        donorShares: {},
         payoutUgnot: 0,
         refundUgnot: 0,
         topUpCount: 0,
@@ -678,6 +763,9 @@ export class HearthBountyRealm {
         claimedHeight: 0,
         deadlineHeight: 0,
         submittedHeight: 0,
+        reviewDeadlineHeight: 0,
+        disputedHeight: 0,
+        disputeDeadlineHeight: 0,
         settledHeight: 0,
         proofURL: "",
         proofDigest: "",
@@ -705,6 +793,7 @@ export class HearthBountyRealm {
           id: String(id),
           sponsor: ctx.caller,
           category: cat,
+          escrow_token: ESCROW_TOKEN_KEY,
           escrow_ugnot: String(amount),
           deadline_blocks: String(blocks),
         },
@@ -715,15 +804,32 @@ export class HearthBountyRealm {
   topUpBounty(ctx: CallContext, id: number): number {
     return this.runGuarded("TopUpBounty", ctx.caller, () => {
       this.requireDirectEOA(ctx, "top up escrow");
-      const amount = this.requireSingleUgnotSend(ctx, 1);
+      const amount = this.requireWugnotEscrow(ctx, MIN_TOPUP_UGNOT);
       const b = this.bounties.get(id);
       if (!b) throw new Error("hearthbounty: bounty not found");
       if (b.status !== "open" && b.status !== "claimed") {
         throw new Error("hearthbounty: can only top up open or claimed bounties");
       }
+      if (b.claimant && ctx.caller === b.claimant) {
+        throw new Error("hearthbounty: active claimant cannot top up own claimed bounty");
+      }
+      if (b.escrowUgnot + amount > MAX_ESCROW_UGNOT) {
+        throw new Error("hearthbounty: escrow total exceeds single-bounty safety ceiling");
+      }
+      const isExternal = ctx.caller !== b.sponsor;
+      if (isExternal && !(ctx.caller in b.donorShares) && Object.keys(b.donorShares).length >= MAX_EXTERNAL_DONORS) {
+        throw new Error("hearthbounty: external donor cap reached for this bounty");
+      }
 
       this.debit(ctx.caller, amount);
       this.realmBankUgnot += amount;
+
+      if (isExternal) {
+        b.donorShares[ctx.caller] = (b.donorShares[ctx.caller] ?? 0) + amount;
+        b.externalTopUpUgnot += amount;
+      } else {
+        b.sponsorFundedUgnot += amount;
+      }
       b.escrowUgnot += amount;
       b.topUpCount += 1;
       this.totalEscrowUgnot += amount;
@@ -753,6 +859,9 @@ export class HearthBountyRealm {
       }
       if (ctx.caller === b.sponsor) {
         throw new Error("hearthbounty: sponsor cannot claim own bounty");
+      }
+      if (ctx.caller in b.donorShares && b.donorShares[ctx.caller] > 0) {
+        throw new Error("hearthbounty: escrow contributor cannot claim own funded bounty");
       }
       const cleanNote = validateText("agentNote", agentNote, 0, MAX_NOTE_LEN);
 
@@ -784,15 +893,25 @@ export class HearthBountyRealm {
       if (b.status !== "claimed") {
         throw new Error("hearthbounty: bounty is not currently claimed");
       }
-      if (ctx.caller !== b.claimant && this.chainHeight <= b.deadlineHeight) {
+      if (ctx.caller !== b.claimant && this.chainHeight < b.deadlineHeight) {
         throw new Error("hearthbounty: claim deadline has not expired yet");
       }
       const prevClaimant = b.claimant;
+      const prevProf = this.profiles.get(prevClaimant);
+      if (prevProf && prevProf.claimedCount > 0) {
+        prevProf.claimedCount -= 1;
+      }
+
       this.transitionStatus(b, "open");
       b.claimant = "";
       b.claimNote = "";
       b.claimedHeight = 0;
       b.deadlineHeight = 0;
+      b.submittedHeight = 0;
+      b.reviewDeadlineHeight = 0;
+      b.proofURL = "";
+      b.proofDigest = "";
+      b.proofSummary = "";
       b.revisionFeedback = "";
 
       return {
@@ -832,6 +951,7 @@ export class HearthBountyRealm {
       b.proofDigest = cleanDigest;
       b.proofSummary = cleanSummary;
       b.submittedHeight = this.chainHeight;
+      b.reviewDeadlineHeight = this.chainHeight + b.deadlineBlocks;
       b.submissionCount += 1;
       b.revisionFeedback = "";
 
@@ -842,6 +962,7 @@ export class HearthBountyRealm {
           id: String(id),
           claimant: ctx.caller,
           proof_digest: cleanDigest,
+          review_deadline_height: String(b.reviewDeadlineHeight),
           submission_count: String(b.submissionCount),
         },
       };
@@ -861,6 +982,7 @@ export class HearthBountyRealm {
       const cleanFeedback = validateText("feedback", feedback, 4, MAX_NOTE_LEN);
       this.transitionStatus(b, "claimed");
       b.revisionFeedback = cleanFeedback;
+      b.reviewDeadlineHeight = 0;
       b.deadlineHeight = this.chainHeight + b.deadlineBlocks;
 
       return {
@@ -875,6 +997,52 @@ export class HearthBountyRealm {
     });
   }
 
+  private settleFull(b: BountyRecord, rating: number, reviewNote: string, eventType: string) {
+    const payout = b.escrowUgnot;
+    const recipient = b.claimant;
+
+    // CEI: effects before token transfers
+    b.escrowUgnot = 0;
+    b.sponsorFundedUgnot = 0;
+    b.externalTopUpUgnot = 0;
+    b.donorShares = {};
+    b.payoutUgnot = payout;
+    b.rating = rating;
+    b.reviewNote = reviewNote;
+    b.settledHeight = this.chainHeight;
+    this.transitionStatus(b, "settled");
+    this.totalEscrowUgnot -= payout;
+    this.totalSettledUgnot += payout;
+
+    const hp = this.getOrCreateProfile(recipient);
+    hp.settledCount += 1;
+    hp.earnedUgnot += payout;
+    if (rating > 0) {
+      hp.ratingSum += rating;
+      hp.ratingCount += 1;
+    }
+
+    const sp = this.getOrCreateProfile(b.sponsor);
+    sp.sponsoredSettled += 1;
+
+    if (payout > 0) {
+      this.realmBankUgnot -= payout;
+      this.credit(recipient, payout);
+    }
+
+    return {
+      result: undefined,
+      eventType,
+      attrs: {
+        id: String(b.id),
+        sponsor: b.sponsor,
+        claimant: recipient,
+        payout_ugnot: String(payout),
+        rating: String(rating),
+      },
+    };
+  }
+
   approveAndSettle(ctx: CallContext, id: number, rating: number, reviewNote: string): void {
     this.runGuarded("ApproveAndSettle", ctx.caller, () => {
       const b = this.bounties.get(id);
@@ -887,45 +1055,21 @@ export class HearthBountyRealm {
       }
       const validRating = validateRating(rating);
       const cleanNote = validateText("reviewNote", reviewNote, 0, MAX_NOTE_LEN);
+      return this.settleFull(b, validRating, cleanNote, "BountySettled");
+    });
+  }
 
-      const payout = b.escrowUgnot;
-      const recipient = b.claimant;
-
-      // Checks-Effects-Interactions (CEI) ordering: update state before bank transfer.
-      b.escrowUgnot = 0;
-      b.payoutUgnot = payout;
-      b.rating = validRating;
-      b.reviewNote = cleanNote;
-      b.settledHeight = this.chainHeight;
-      this.transitionStatus(b, "settled");
-      this.totalEscrowUgnot -= payout;
-      this.totalSettledUgnot += payout;
-
-      const hp = this.getOrCreateProfile(recipient);
-      hp.settledCount += 1;
-      hp.earnedUgnot += payout;
-      hp.ratingSum += validRating;
-      hp.ratingCount += 1;
-
-      const sp = this.getOrCreateProfile(b.sponsor);
-      sp.sponsoredSettled += 1;
-
-      if (payout > 0) {
-        this.realmBankUgnot -= payout;
-        this.credit(recipient, payout);
+  expireSubmission(ctx: CallContext, id: number): void {
+    this.runGuarded("ExpireSubmission", ctx.caller, () => {
+      const b = this.bounties.get(id);
+      if (!b) throw new Error("hearthbounty: bounty not found");
+      if (b.status !== "submitted") {
+        throw new Error("hearthbounty: bounty has no pending submission");
       }
-
-      return {
-        result: undefined,
-        eventType: "BountySettled",
-        attrs: {
-          id: String(id),
-          sponsor: b.sponsor,
-          claimant: recipient,
-          payout_ugnot: String(payout),
-          rating: String(validRating),
-        },
-      };
+      if (this.chainHeight < b.reviewDeadlineHeight) {
+        throw new Error("hearthbounty: submission review window has not expired yet");
+      }
+      return this.settleFull(b, 0, "[Auto-Settled] Sponsor review window expired", "SubmissionExpiredSettled");
     });
   }
 
@@ -940,16 +1084,44 @@ export class HearthBountyRealm {
         throw new Error("hearthbounty: only the sponsor may cancel");
       }
 
-      const refund = b.escrowUgnot;
-      b.escrowUgnot = 0;
-      b.refundUgnot = refund;
-      this.transitionStatus(b, "cancelled");
-      this.totalEscrowUgnot -= refund;
-      this.totalRefundUgnot += refund;
+      const totalRefund = b.escrowUgnot;
+      const sponsorRefund = b.sponsorFundedUgnot;
+      const donorRefunds: Array<{ addr: string; amount: number }> = [];
+      let externalRefundTotal = 0;
 
-      if (refund > 0) {
-        this.realmBankUgnot -= refund;
-        this.credit(b.sponsor, refund);
+      for (const addr of Object.keys(b.donorShares).sort()) {
+        const amt = b.donorShares[addr];
+        if (amt > 0) {
+          donorRefunds.push({ addr, amount: amt });
+          externalRefundTotal += amt;
+        }
+      }
+      if (sponsorRefund + externalRefundTotal !== totalRefund) {
+        throw new Error("hearthbounty: internal escrow custody invariant mismatch");
+      }
+
+      // CEI: effects before interactions
+      b.escrowUgnot = 0;
+      b.sponsorFundedUgnot = 0;
+      b.externalTopUpUgnot = 0;
+      b.donorShares = {};
+      b.refundUgnot = totalRefund;
+      this.transitionStatus(b, "cancelled");
+      this.totalEscrowUgnot -= totalRefund;
+      this.totalRefundUgnot += totalRefund;
+
+      this.decrementSponsoredCredit(b.sponsor, sponsorRefund);
+      for (const dr of donorRefunds) {
+        this.decrementSponsoredCredit(dr.addr, dr.amount);
+      }
+
+      if (sponsorRefund > 0) {
+        this.realmBankUgnot -= sponsorRefund;
+        this.credit(b.sponsor, sponsorRefund);
+      }
+      for (const dr of donorRefunds) {
+        this.realmBankUgnot -= dr.amount;
+        this.credit(dr.addr, dr.amount);
       }
 
       return {
@@ -958,7 +1130,9 @@ export class HearthBountyRealm {
         attrs: {
           id: String(id),
           sponsor: b.sponsor,
-          refund_ugnot: String(refund),
+          sponsor_refund_ugnot: String(sponsorRefund),
+          external_refund_ugnot: String(externalRefundTotal),
+          refund_ugnot: String(totalRefund),
         },
       };
     });
@@ -978,13 +1152,95 @@ export class HearthBountyRealm {
       this.transitionStatus(b, "disputed");
       b.disputeReason = cleanReason;
       b.disputeOpenedBy = ctx.caller;
+      b.disputedHeight = this.chainHeight;
+      b.disputeDeadlineHeight = this.chainHeight + b.deadlineBlocks;
 
       return {
         result: undefined,
         eventType: "DisputeOpened",
-        attrs: { id: String(id), opened_by: ctx.caller, reason: cleanReason },
+        attrs: {
+          id: String(id),
+          opened_by: ctx.caller,
+          dispute_deadline_height: String(b.disputeDeadlineHeight),
+          reason: cleanReason,
+        },
       };
     });
+  }
+
+  private settleDisputeSplit(
+    b: BountyRecord,
+    hunterBps: number,
+    reviewNote: string,
+    resolver: string,
+    eventType: string,
+  ) {
+    const escrow = b.escrowUgnot;
+    const { sponsorRefundUgnot: sponsorRefund } = computeSplit(b.sponsorFundedUgnot, hunterBps);
+
+    const donorRefunds: Array<{ addr: string; amount: number }> = [];
+    let totalRefunds = sponsorRefund;
+    for (const addr of Object.keys(b.donorShares).sort()) {
+      const amt = b.donorShares[addr];
+      if (amt > 0) {
+        const { sponsorRefundUgnot: dRefund } = computeSplit(amt, hunterBps);
+        if (dRefund > 0) {
+          donorRefunds.push({ addr, amount: dRefund });
+          totalRefunds += dRefund;
+        }
+      }
+    }
+    const hunterShare = escrow - totalRefunds;
+
+    // CEI: effects before transfers
+    b.escrowUgnot = 0;
+    b.sponsorFundedUgnot = 0;
+    b.externalTopUpUgnot = 0;
+    b.donorShares = {};
+    b.payoutUgnot = hunterShare;
+    b.refundUgnot = totalRefunds;
+    b.reviewNote = reviewNote;
+    b.settledHeight = this.chainHeight;
+    this.transitionStatus(b, "settled");
+    this.totalEscrowUgnot -= escrow;
+    this.totalSettledUgnot += hunterShare;
+    this.totalRefundUgnot += totalRefunds;
+
+    if (hunterShare > 0) {
+      const hp = this.getOrCreateProfile(b.claimant);
+      hp.settledCount += 1;
+      hp.earnedUgnot += hunterShare;
+    }
+    this.decrementSponsoredCredit(b.sponsor, sponsorRefund);
+    for (const dr of donorRefunds) {
+      this.decrementSponsoredCredit(dr.addr, dr.amount);
+    }
+
+    if (hunterShare > 0) {
+      this.realmBankUgnot -= hunterShare;
+      this.credit(b.claimant, hunterShare);
+    }
+    if (sponsorRefund > 0) {
+      this.realmBankUgnot -= sponsorRefund;
+      this.credit(b.sponsor, sponsorRefund);
+    }
+    for (const dr of donorRefunds) {
+      this.realmBankUgnot -= dr.amount;
+      this.credit(dr.addr, dr.amount);
+    }
+
+    return {
+      result: undefined,
+      eventType,
+      attrs: {
+        id: String(b.id),
+        resolver,
+        hunter_bps: String(hunterBps),
+        hunter_ugnot: String(hunterShare),
+        sponsor_refund_ugnot: String(sponsorRefund),
+        total_refund_ugnot: String(totalRefunds),
+      },
+    };
   }
 
   resolveDispute(ctx: CallContext, id: number, hunterBps: number, resolution: string): void {
@@ -997,47 +1253,31 @@ export class HearthBountyRealm {
       if (b.status !== "disputed") {
         throw new Error("hearthbounty: bounty is not disputed");
       }
+      if (ctx.caller === b.sponsor || ctx.caller === b.claimant) {
+        throw new Error("hearthbounty: arbiter cannot resolve a bounty they are party to");
+      }
       const cleanResolution = validateText("resolution", resolution, 4, MAX_NOTE_LEN);
-      const escrow = b.escrowUgnot;
-      const { hunterUgnot, sponsorRefundUgnot } = computeSplit(escrow, hunterBps);
+      return this.settleDisputeSplit(b, hunterBps, `[Arbiter Resolution] ${cleanResolution}`, ctx.caller, "DisputeResolved");
+    });
+  }
 
-      // CEI ordering
-      b.escrowUgnot = 0;
-      b.payoutUgnot = hunterUgnot;
-      b.refundUgnot = sponsorRefundUgnot;
-      b.reviewNote = `[Arbiter Resolution] ${cleanResolution}`;
-      b.settledHeight = this.chainHeight;
-      this.transitionStatus(b, "settled");
-      this.totalEscrowUgnot -= escrow;
-      this.totalSettledUgnot += hunterUgnot;
-      this.totalRefundUgnot += sponsorRefundUgnot;
-
-      if (hunterUgnot > 0) {
-        const hp = this.getOrCreateProfile(b.claimant);
-        hp.settledCount += 1;
-        hp.earnedUgnot += hunterUgnot;
+  expireDispute(ctx: CallContext, id: number): void {
+    this.runGuarded("ExpireDispute", ctx.caller, () => {
+      const b = this.bounties.get(id);
+      if (!b) throw new Error("hearthbounty: bounty not found");
+      if (b.status !== "disputed") {
+        throw new Error("hearthbounty: bounty is not disputed");
       }
-
-      if (hunterUgnot > 0) {
-        this.realmBankUgnot -= hunterUgnot;
-        this.credit(b.claimant, hunterUgnot);
+      if (this.chainHeight < b.disputeDeadlineHeight) {
+        throw new Error("hearthbounty: dispute resolution window has not expired yet");
       }
-      if (sponsorRefundUgnot > 0) {
-        this.realmBankUgnot -= sponsorRefundUgnot;
-        this.credit(b.sponsor, sponsorRefundUgnot);
-      }
-
-      return {
-        result: undefined,
-        eventType: "DisputeResolved",
-        attrs: {
-          id: String(id),
-          arbiter: ctx.caller,
-          hunter_bps: String(hunterBps),
-          hunter_ugnot: String(hunterUgnot),
-          sponsor_refund_ugnot: String(sponsorRefundUgnot),
-        },
-      };
+      return this.settleDisputeSplit(
+        b,
+        5000,
+        "[Timeout Split 50/50] Arbiter resolution window expired",
+        ctx.caller,
+        "DisputeExpiredSplit",
+      );
     });
   }
 
@@ -1045,7 +1285,10 @@ export class HearthBountyRealm {
 
   getStats(): BoardStats {
     return {
-      realm_path: REALM_WEB_BASE,
+      realm_path: REALM_PKG_PATH,
+      web_path: REALM_WEB_BASE,
+      escrow_token: ESCROW_TOKEN_KEY,
+      escrow_address: REALM_ESCROW_ADDRESS,
       arbiter: this.arbiter,
       chain_height: this.chainHeight,
       total_bounties: this.bounties.size,
@@ -1100,6 +1343,9 @@ export class HearthBountyRealm {
       claim_note: b.claimNote,
       escrow_ugnot: b.escrowUgnot,
       initial_ugnot: b.initialUgnot,
+      sponsor_funded_ugnot: b.sponsorFundedUgnot,
+      external_top_up_ugnot: b.externalTopUpUgnot,
+      external_donor_count: Object.keys(b.donorShares).length,
       payout_ugnot: b.payoutUgnot,
       refund_ugnot: b.refundUgnot,
       reward_formatted: formatGNOT(effectiveReward(b)),
@@ -1109,6 +1355,9 @@ export class HearthBountyRealm {
       claimed_height: b.claimedHeight,
       deadline_height: b.deadlineHeight,
       submitted_height: b.submittedHeight,
+      review_deadline_height: b.reviewDeadlineHeight,
+      disputed_height: b.disputedHeight,
+      dispute_deadline_height: b.disputeDeadlineHeight,
       settled_height: b.settledHeight,
       proof_url: b.proofURL,
       proof_digest: b.proofDigest,
@@ -1203,9 +1452,9 @@ export class HearthBountyRealm {
         )
         .join("\n");
       return [
-        "# HearthBounty",
+        "# HearthBounty v1",
         "",
-        `Active Escrow: **${formatGNOT(stats.total_escrow_ugnot)}** | Settled Volume: **${formatGNOT(stats.total_settled_ugnot)}** | Block Height: \`${stats.chain_height}\``,
+        `Active Escrow: **${formatGNOT(stats.total_escrow_ugnot)}** (1:1 wugnot) | Settled Volume: **${formatGNOT(stats.total_settled_ugnot)}** | Block Height: \`${stats.chain_height}\``,
         "",
         "| ID | Bounty | Track | Status | Escrow / Payout |",
         "|---:|---|---|---|---|",
@@ -1220,9 +1469,11 @@ export class HearthBountyRealm {
         `# Bounty #${b.id}: ${sanitizeRenderText(b.title)}`,
         "",
         `- **Status:** ${STATUS_LABELS[b.status]}`,
-        `- **Escrow:** ${formatGNOT(b.escrowUgnot)}`,
+        `- **Escrow:** ${formatGNOT(b.escrowUgnot)} (Sponsor ${formatGNOT(b.sponsorFundedUgnot)} · Donors ${formatGNOT(b.externalTopUpUgnot)})`,
         `- **Sponsor:** \`${b.sponsor}\``,
         b.claimant ? `- **Claimant:** \`${b.claimant}\`` : `- **Claimant:** Open`,
+        b.reviewDeadlineHeight ? `- **Review Timeout:** Block #${b.reviewDeadlineHeight}` : "",
+        b.disputeDeadlineHeight ? `- **Dispute Timeout:** Block #${b.disputeDeadlineHeight}` : "",
         b.proofURL ? `- **Proof URL:** ${b.proofURL}` : "",
         b.proofDigest ? `- **Digest:** \`${b.proofDigest}\`` : "",
         "",
@@ -1246,6 +1497,7 @@ export class HearthBountyRealm {
         "",
         `Registered MCP Agents: **${stats.agent_count}**`,
         `Realm Path: \`${REALM_PKG_PATH}\``,
+        `Escrow Token: \`${ESCROW_TOKEN_KEY}\` (Spender \`${REALM_ESCROW_ADDRESS}\`)`,
         "JSON Endpoints: `ExportStatsJSON()`, `ExportBountiesJSON(...)`, `ExportBountyJSON(id)`, `ExportLeaderboardJSON(limit)`, `ExportProfileJSON(addr)`",
       ].join("\n");
     }
@@ -1253,13 +1505,9 @@ export class HearthBountyRealm {
   }
 }
 
-/**
- * Seeds the simulator with the exact 3 profiles and 5 realistic micro-bounties
- * from scripts/seed-dev.sh so judges land on live state immediately.
- */
 export function createSeededRealm(): HearthBountyRealm {
   const [sponsor, agent, builder, arbiter] = DEMO_ACTORS;
-  const realm = new HearthBountyRealm(arbiter.address, 1_374_813);
+  const realm = new HearthBountyRealm(arbiter.address, 1_378_958);
   realm.seedBalances();
 
   realm.registerProfile(
@@ -1284,7 +1532,6 @@ export function createSeededRealm(): HearthBountyRealm {
     "",
   );
 
-  // 5 funded bounties across all 5 categories
   realm.postBounty(
     { caller: sponsor.address, sentCoins: [{ denom: DENOM, amount: 12_000_000 }] },
     "Deterministic AVL Leaderboard Paginator",
@@ -1295,7 +1542,7 @@ export function createSeededRealm(): HearthBountyRealm {
   realm.postBounty(
     { caller: sponsor.address, sentCoins: [{ denom: DENOM, amount: 5_500_000 }] },
     "Interrealm v2 Payment Guard Fuzz Suite",
-    "Write adversarial unit tests covering AssertOriginCall, IsUserCall, and multi-denom rejection across escrow entrypoints.",
+    "Write adversarial unit tests covering AssertOriginCall, IsUserCall, and per-contributor refund custody.",
     "audit",
     40_000,
   );
@@ -1321,8 +1568,7 @@ export function createSeededRealm(): HearthBountyRealm {
     45_000,
   );
 
-  // Lifecycle transitions matching scripts/seed-dev.sh
-  // #1 -> Claimed -> Submitted -> Settled by anvil-mcp-agent (earns 12.00 GNOT -> Journeyman!)
+  // #1 -> Settled by anvil-mcp-agent (earns 12.00 GNOT -> Journeyman)
   realm.claimBounty(
     { caller: agent.address },
     1,
@@ -1333,7 +1579,7 @@ export function createSeededRealm(): HearthBountyRealm {
     1,
     "https://github.com/hearthbounty/avl-pager-demo/pull/1",
     "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
-    "Delivered deterministic AVL cursor pagination with 14/14 passing gno tests and zero lint warnings.",
+    "Delivered deterministic AVL cursor pagination with 16/16 passing gno tests and zero lint warnings.",
   );
   realm.approveAndSettle(
     { caller: sponsor.address },
@@ -1342,28 +1588,28 @@ export function createSeededRealm(): HearthBountyRealm {
     "Clean idiomatic Gno v1.8 code and thorough test coverage.",
   );
 
-  // #2 -> Claimed -> Submitted (awaiting sponsor review) by ironforge-dev
+  // #2 -> Submitted (awaiting sponsor review or ExpireSubmission timeout)
   realm.claimBounty(
     { caller: builder.address },
     2,
-    "Writing adversarial interrealm crossing tests and escrow conservation checks.",
+    "Writing adversarial interrealm crossing tests and per-donor custody checks.",
   );
   realm.submitProof(
     { caller: builder.address },
     2,
     "https://github.com/hearthbounty/audit-suite/pull/4",
     "sha256:35521353280362463ce812e1faccc666447e578485b32ded62a63a5fe0687252",
-    "Added 9 adversarial test cases verifying AssertOriginCall, single-denom ugnot checks, and CEI invariants.",
+    "Added adversarial tests verifying H-1 per-donor refunds, M-1 timeout expiry, and M-2 Unicode tag defense.",
   );
 
-  // #3 -> Claimed (in progress) by anvil-mcp-agent
+  // #3 -> Claimed (in progress)
   realm.claimBounty(
     { caller: agent.address },
     3,
     "Building MCP SHA-256 verifier and wiring live Onyx integration checks.",
   );
 
-  // #5 -> Crowd-funded top-up (+1.20 GNOT -> 6.00 GNOT total) by ironforge-dev
+  // #5 -> Crowd-funded top-up (+1.20 GNOT by ironforge-dev -> 4.80 sponsor + 1.20 external donor)
   realm.topUpBounty(
     { caller: builder.address, sentCoins: [{ denom: DENOM, amount: 1_200_000 }] },
     5,

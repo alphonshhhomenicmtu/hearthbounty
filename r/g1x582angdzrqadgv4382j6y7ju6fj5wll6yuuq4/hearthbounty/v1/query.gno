@@ -5,11 +5,37 @@ import (
 	"sort"
 
 	"gno.land/p/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthcore/v0"
+	"gno.land/r/nt/grc20reg/v0"
 )
 
 // Arbiter returns the current dispute arbiter address.
 func Arbiter() address {
 	return arbiter
+}
+
+// PkgPath returns the canonical Gno.land package path of this realm.
+func PkgPath() string {
+	return realmPkgPath
+}
+
+// EscrowToken returns the canonical grc20reg key used for 1:1 ugnot-backed escrow.
+func EscrowToken() string {
+	return EscrowTokenKey
+}
+
+// EscrowRealmAddress returns the derived realm address that holds escrowed wugnot.
+func EscrowRealmAddress() address {
+	return realmAddress
+}
+
+// EscrowBalance returns the current wugnot balance of addr from grc20reg.
+func EscrowBalance(addr address) int64 {
+	return grc20reg.MustGet(EscrowTokenKey).BalanceOf(addr)
+}
+
+// EscrowAllowance returns how much wugnot owner has approved this realm to pull.
+func EscrowAllowance(owner address) int64 {
+	return grc20reg.MustGet(EscrowTokenKey).Allowance(owner, realmAddress)
 }
 
 // GetStats returns an immutable snapshot of protocol counters and escrow totals.
@@ -39,6 +65,19 @@ func GetBounty(id uint64) (BountyView, bool) {
 	return toBountyView(b), true
 }
 
+// GetDonorContribution returns the external top-up ugnot currently held in
+// custody for donor on bounty id (0 if none or if donor is the sponsor).
+func GetDonorContribution(id uint64, donor address) int64 {
+	b, ok := getBountyRecord(id)
+	if !ok || b.DonorShares == nil {
+		return 0
+	}
+	if raw := b.DonorShares.Get(string(donor)); raw != nil {
+		return raw.(int64)
+	}
+	return 0
+}
+
 // GetProfile returns a value copy of a builder or AI agent profile.
 func GetProfile(addr address) (ProfileView, bool) {
 	raw := profiles.Get(string(addr))
@@ -52,7 +91,10 @@ func GetProfile(addr address) (ProfileView, bool) {
 func ExportStatsJSON() string {
 	s := GetStats()
 	return hearthcore.NewJSONObject().
-		Str("realm_path", realmWebBase).
+		Str("realm_path", realmPkgPath).
+		Str("web_path", realmWebBase).
+		Str("escrow_token", EscrowTokenKey).
+		Str("escrow_address", string(realmAddress)).
 		Str("arbiter", string(arbiter)).
 		Int64("chain_height", runtime.ChainHeight()).
 		Int64("total_bounties", int64(s.TotalBounties)).
@@ -157,6 +199,10 @@ func effectiveReward(b *bountyRecord) int64 {
 }
 
 func encodeBountyJSON(b *bountyRecord, includeFound bool) string {
+	donorCount := int64(0)
+	if b.DonorShares != nil {
+		donorCount = int64(b.DonorShares.Size())
+	}
 	jb := hearthcore.NewJSONObject()
 	if includeFound {
 		jb.Bool("found", true)
@@ -171,6 +217,9 @@ func encodeBountyJSON(b *bountyRecord, includeFound bool) string {
 		Str("claim_note", b.ClaimNote).
 		Int64("escrow_ugnot", b.EscrowUgnot).
 		Int64("initial_ugnot", b.InitialUgnot).
+		Int64("sponsor_funded_ugnot", b.SponsorFundedUgnot).
+		Int64("external_top_up_ugnot", b.ExternalTopUpUgnot).
+		Int64("external_donor_count", donorCount).
 		Int64("payout_ugnot", b.PayoutUgnot).
 		Int64("refund_ugnot", b.RefundUgnot).
 		Str("reward_formatted", hearthcore.FormatGNOT(effectiveReward(b))).
@@ -180,6 +229,9 @@ func encodeBountyJSON(b *bountyRecord, includeFound bool) string {
 		Int64("claimed_height", b.ClaimedHeight).
 		Int64("deadline_height", b.DeadlineHeight).
 		Int64("submitted_height", b.SubmittedHeight).
+		Int64("review_deadline_height", b.ReviewDeadlineHeight).
+		Int64("disputed_height", b.DisputedHeight).
+		Int64("dispute_deadline_height", b.DisputeDeadlineHeight).
 		Int64("settled_height", b.SettledHeight).
 		Str("proof_url", b.ProofURL).
 		Str("proof_digest", b.ProofDigest).

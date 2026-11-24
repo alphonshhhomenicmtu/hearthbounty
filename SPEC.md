@@ -31,7 +31,7 @@
 1. **CRITICAL NAMING RULE:** Project names **MUST NOT use the `"Gno"` prefix** or any name/branding implying an official connection to or endorsement by Gno.land. Projects violating this rule may be disqualified.
    - **Selected Project Name:** **`HearthBounty`** (contains zero `"Gno"` prefix or substring; authentic tavern-hearth bounty board identity).
 2. **Mandatory Deliverables:**
-   - Live working deployment on the **Gno.land testnet** (`onyx-1`) with deployment link (`https://onyx.testnets.gno.land/r/<namespace>/hearthbounty/v0`)
+   - Live working deployments on the **Gno.land testnet** (`onyx-1`): `hearthcore/v0`, `hearthbounty/v1`, and companion consumer realm `hearthguild/v0` under `g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4`
    - Public code repository (GitHub/GitLab/Bitbucket)
    - Genuine Gno component (stateful `/r/` realm and reusable `/p/` package)
    - Clear `README.md` with usage & deployment guide
@@ -92,13 +92,13 @@ Confirmed live on `rpc.onyx.testnets.gno.land:443` via `vm/qpaths`:
 - `gno.land/p/nt/ownable/v0`
 - `gno.land/p/moul/txlink/v0`, `gno.land/p/moul/md/v0`, `gno.land/p/moul/mdtable/v0`
 
-### Gno v1.8.0 Security & Language Rules Enforced in HearthBounty
+### Gno v1.8.0 Security & Language Rules Enforced in HearthBounty v1
 
-1. **Interrealm v2 Crossing Discipline:** Every state-mutating entrypoint accepts `cur realm` as its first parameter; caller identity is always derived from runtime-current `cur.Previous().Address()`. Never use `unsafe.PreviousRealm()` for authorization.
-2. **Payment & Escrow Guards:** Every payable function verifies `cur.Previous().IsUserCall()`, validates `banker.OriginSend()` contains exclusively positive `ugnot` coins, follows Checks-Effects-Interactions (CEI), and releases funds via `banker.NewBanker(banker.BankerTypeRealmSend, cur)`.
-3. **Strict Determinism:** Pure Gno subset only (no `os`, `net/http`, wall-clock randomness, float math for financial splits). All ordered state uses `avl.Tree` + `seqid.ID`; dispute splits use integer basis points (`0..10000`).
-4. **Render Safety:** `Render(path string) string` is strictly read-only, uses `p/nt/mux/v0` routing, sanitizes every user-controlled string with `p/nt/markdown/sanitize/v0` plus `\$` math escaping, and leverages native gnoweb v1.8.0 extensions (`<gno-columns>`, `<gno-frame>`, `<gno-form>`, `<gno-button />`, `<gno-icon />`, callout alerts, and deterministic on-chain SVG `data:image/svg+xml;base64,...` visuals).
-5. **AI Agent MCP Bridge (`gnomcp`-compatible):** Ships a dedicated TypeScript MCP server (`hearthbounty-mcp`) + CLI that speaks native Tendermint ABCI JSON-RPC (`vm/qeval`, `vm/qrender`, `vm/qpkgmeta_json`, `/status`), integrates alongside official `gnomcp` (`https://mcp.gno.dev`), and enforces testnet/devnet-only write safety (never signs on `gnoland-1` mainnet).
+1. **Interrealm v2 Crossing Discipline:** Every state-mutating entrypoint accepts `cur realm` as its first parameter; caller identity is always derived from runtime-current `cur.Previous().Address()`. Zero `chain/banker` and zero `chain/runtime/unsafe` imports across all production `.gno` files.
+2. **1:1 `wugnot` Escrow & Per-Contributor Custody (H-1):** `PostBounty` and `TopUpBounty` enforce `runtime.AssertOriginCall()` + `cur.Previous().IsUserCall()` and pull pre-approved 1:1 `ugnot`-backed `wugnot` (`gno.land/r/gnoland/wugnot.wugnot`) via non-crossing `gno.land/r/nt/grc20reg/v0` `RealmTeller` transfers. External top-up shares are tracked per contributor in an AVL `DonorShares` ledger so `CancelBounty` and dispute splits refund each donor directly rather than handing third-party funds to the sponsor, while blocking donor self-claim and active-claimant top-up washes.
+3. **Bounded Liveness & Arbiter Conflict Guard (M-1):** Permissionless `ExpireSubmission` settles 100% escrow to the claimant after `ReviewDeadlineHeight`; `ResolveDispute` rejects conflicted arbiters (`caller == sponsor || caller == claimant`); permissionless `ExpireDispute` executes a 50/50 pro-rata split after `DisputeDeadlineHeight`.
+4. **Unicode-Safe Render Defense (M-2):** `Render(path string) string` is strictly read-only, uses paginated `p/nt/mux/v0` routing (20 rows/page), sanitizes every user-controlled string with `p/nt/markdown/sanitize/v0`, `EscapeMath`, and byte-indexed ASCII case-folding `NeutralizeGnoTags` (immune to `U+0130` `'İ'` index desync), and enforces `https://`-only deliverable links.
+5. **Composable Consumer Realm (`hearthguild/v0`) & 12-Tool MCP Bridge:** Companion consumer realm `hearthguild/v0` imports both `hearthcore/v0` and `hearthbounty/v1` for on-chain builder passports and DAO eligibility gates. `hearthbounty-mcp` (12 stdio MCP tools + `hearth-cli`) pairs with `gnomcp` (`https://mcp.gno.dev`) and enforces testnet/devnet-only write safety (`gnoland-1` mainnet is permanently read-only).
 
 ## 6. Official Ecosystem Links
 

@@ -1,14 +1,19 @@
 /**
- * Exact browser-side emulator and inspector for all 10 hearthbounty-mcp tools
+ * Browser-side MCP emulator mirroring all 12 hearthbounty-mcp tools
  * (mirrors mcp-server/src/tools.ts and mcp-server/src/server.ts).
+ * Clearly labeled as an in-browser emulator over the local simulator state;
+ * real stdio MCP execution against live Onyx runs via mcp-server/.
  */
 
 import {
   BountyCategory,
   computeSha256Digest,
+  ESCROW_TOKEN_KEY,
   formatGNOT,
   HearthBountyRealm,
+  MAX_ESCROW_UGNOT,
   MIN_REWARD_UGNOT,
+  REALM_ESCROW_ADDRESS,
   REALM_PKG_PATH,
   VALID_CATEGORIES,
 } from "./engine.js";
@@ -16,6 +21,7 @@ import { ONYX_GNOWEB_URL, ONYX_RPC_URL } from "./onyx.js";
 
 export const DEFAULT_GAS_WANTED = 10_000_000;
 export const DEFAULT_GAS_FEE = "10000ugnot";
+export const WUGNOT_PKG_PATH = "gno.land/r/gnoland/wugnot";
 
 export type McpToolName =
   | "hearth_chain_status"
@@ -27,7 +33,9 @@ export type McpToolName =
   | "hearth_prepare_post_bounty"
   | "hearth_prepare_claim"
   | "hearth_prepare_submit_proof"
-  | "hearth_prepare_settle";
+  | "hearth_prepare_settle"
+  | "hearth_prepare_expire_submission"
+  | "hearth_prepare_expire_dispute";
 
 export interface McpToolDefinition {
   name: McpToolName;
@@ -40,19 +48,19 @@ export const MCP_TOOLS: McpToolDefinition[] = [
   {
     name: "hearth_chain_status",
     mode: "read",
-    summary: "Inspect node status, realm liveness, and global escrow statistics.",
+    summary: "Inspect node status, realm metadata, and global 1:1 wugnot escrow statistics.",
     defaultArgs: {},
   },
   {
     name: "hearth_list_bounties",
     mode: "read",
-    summary: "Discover bounties filtered by status, category, and minimum ugnot reward.",
+    summary: "Discover bounties filtered by status, category, and minimum wugnot reward.",
     defaultArgs: { status: "open", category: "", minRewardUgnot: 0, limit: 10 },
   },
   {
     name: "hearth_get_bounty",
     mode: "read",
-    summary: "Read specification, escrow balance, proof digest, and review state for one bounty.",
+    summary: "Read spec, per-donor custody split, review/dispute timeouts, and proof digest for one bounty.",
     defaultArgs: { id: 5 },
   },
   {
@@ -76,7 +84,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
   {
     name: "hearth_prepare_post_bounty",
     mode: "write-prep",
-    summary: "Validate and build a PostBounty transaction (gnokey + gnomcp) with ugnot escrow.",
+    summary: "Build 1:1 wugnot Deposit/Approve pre-steps + PostBounty payload (gnokey + gnomcp).",
     defaultArgs: {
       title: "Build Deterministic Merkle Verifier",
       spec: "Create a pure Gno Merkle inclusion verifier package with full unit tests and zero lint warnings.",
@@ -99,11 +107,11 @@ export const MCP_TOOLS: McpToolDefinition[] = [
   {
     name: "hearth_prepare_submit_proof",
     mode: "write-prep",
-    summary: "Verify claim ownership, hash deliverable via SHA-256, and build SubmitProof tx.",
+    summary: "Enforce https:// proof URL, hash deliverable via SHA-256, and build SubmitProof tx.",
     defaultArgs: {
       id: 3,
       proofURL: "https://github.com/alphonshhhomenicmtu/hearthbounty/pull/12",
-      proofContent: "hearthbounty-v2-verified-deliverable-artifact",
+      proofContent: "hearthbounty-v21-verified-deliverable-artifact",
       summary: "Delivered SHA-256 verifier tool and confirmed all MCP protocol tests pass.",
       keyName: "agent-key",
     },
@@ -115,8 +123,26 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     defaultArgs: {
       id: 2,
       rating: 5,
-      reviewNote: "All 9 adversarial payment guard tests verified.",
+      reviewNote: "All adversarial custody, timeout, and Unicode sanitizer tests verified.",
       keyName: "sponsor-key",
+    },
+  },
+  {
+    name: "hearth_prepare_expire_submission",
+    mode: "write-prep",
+    summary: "Build permissionless ExpireSubmission payload to auto-settle 100% after ReviewDeadlineHeight.",
+    defaultArgs: {
+      id: 2,
+      keyName: "bystander-key",
+    },
+  },
+  {
+    name: "hearth_prepare_expire_dispute",
+    mode: "write-prep",
+    summary: "Build permissionless ExpireDispute payload for 50/50 fallback after DisputeDeadlineHeight.",
+    defaultArgs: {
+      id: 2,
+      keyName: "bystander-key",
     },
   },
 ];
@@ -155,13 +181,15 @@ export function buildPreparedTx(
   send?: string,
   subRoute = "",
   keyName = "<your-key>",
+  pkgPathOverride?: string,
 ) {
   assertWritableChain(chainId);
+  const targetPkg = pkgPathOverride ?? REALM_PKG_PATH;
   const rpcUrl = chainId === "dev" ? "http://127.0.0.1:26657" : ONYX_RPC_URL;
   const gnowebBase = chainId === "dev" ? "http://127.0.0.1:8888" : ONYX_GNOWEB_URL;
   const parts = [
     "gnokey maketx call",
-    `-pkgpath ${shellQuote(REALM_PKG_PATH)}`,
+    `-pkgpath ${shellQuote(targetPkg)}`,
     `-func ${shellQuote(func)}`,
     ...args.map((a) => `-args ${shellQuote(a)}`),
   ];
@@ -175,13 +203,13 @@ export function buildPreparedTx(
     keyName,
   );
   const profile = chainId === "dev" ? "local" : "testnet";
-  const pathPart = REALM_PKG_PATH.replace(/^[^/]+/, "");
+  const pathPart = targetPkg.replace(/^[^/]+/, "");
   const gnowebUrl = subRoute ? `${gnowebBase}${pathPart}:${subRoute}` : `${gnowebBase}${pathPart}`;
 
   return {
     chainId,
     rpcUrl,
-    pkgPath: REALM_PKG_PATH,
+    pkgPath: targetPkg,
     func,
     args,
     ...(send ? { send } : {}),
@@ -190,7 +218,7 @@ export function buildPreparedTx(
     gnokeyCommand: parts.join(" "),
     gnomcpCallArgs: {
       profile,
-      pkg_path: REALM_PKG_PATH,
+      pkg_path: targetPkg,
       func,
       args,
       ...(send ? { send } : {}),
@@ -221,13 +249,14 @@ export async function executeMcpTool(
     switch (tool) {
       case "hearth_chain_status": {
         response = {
+          mode: "in-browser-emulator",
           node: {
             network: chainId,
             latestBlockHeight: realm.chainHeight,
             catchingUp: false,
           },
           realmPath: REALM_PKG_PATH,
-          packageStatus: "simulated-live",
+          packageStatus: "in-browser-emulator",
           gnowebUrl: `${ONYX_GNOWEB_URL}${REALM_PKG_PATH.replace(/^[^/]+/, "")}`,
           stats: JSON.parse(realm.exportStatsJSON()),
         };
@@ -281,18 +310,33 @@ export async function executeMcpTool(
         if (!VALID_CATEGORIES.includes(category)) {
           throw new Error(`Invalid category "${category}".`);
         }
-        if (!Number.isInteger(rewardUgnot) || rewardUgnot < MIN_REWARD_UGNOT) {
-          throw new Error(`rewardUgnot must be an integer >= ${MIN_REWARD_UGNOT} (0.10 GNOT).`);
+        if (!Number.isInteger(rewardUgnot) || rewardUgnot < MIN_REWARD_UGNOT || rewardUgnot > MAX_ESCROW_UGNOT) {
+          throw new Error(`rewardUgnot must be an integer between ${MIN_REWARD_UGNOT} (0.10 GNOT) and ${MAX_ESCROW_UGNOT}.`);
         }
+        const keyName = String(args.keyName ?? "<your-key>");
         response = {
           rewardFormatted: formatGNOT(rewardUgnot),
+          escrowToken: ESCROW_TOKEN_KEY,
+          escrowSpender: REALM_ESCROW_ADDRESS,
+          escrowPreSteps: [
+            buildPreparedTx(chainId, "Deposit", [], `${rewardUgnot}ugnot`, "", keyName, WUGNOT_PKG_PATH),
+            buildPreparedTx(
+              chainId,
+              "Approve",
+              [REALM_ESCROW_ADDRESS, String(rewardUgnot)],
+              undefined,
+              "",
+              keyName,
+              WUGNOT_PKG_PATH,
+            ),
+          ],
           transaction: buildPreparedTx(
             chainId,
             "PostBounty",
-            [title, spec, category, String(deadlineBlocks)],
-            `${rewardUgnot}ugnot`,
+            [title, spec, category, String(rewardUgnot), String(deadlineBlocks)],
+            undefined,
             "post",
-            String(args.keyName ?? "<your-key>"),
+            keyName,
           ),
         };
         break;
@@ -300,7 +344,7 @@ export async function executeMcpTool(
       case "hearth_prepare_claim": {
         const id = Number(args.id ?? 0);
         const bounty = realm.bounties.get(id);
-        if (!bounty) throw new Error(`Bounty #${id} was not found on-chain.`);
+        if (!bounty) throw new Error(`Bounty #${id} was not found in simulator state.`);
         if (bounty.status !== "open") {
           throw new Error(`Bounty #${id} is "${bounty.status}", not "open".`);
         }
@@ -326,8 +370,8 @@ export async function executeMcpTool(
       case "hearth_prepare_submit_proof": {
         const id = Number(args.id ?? 0);
         const url = String(args.proofURL ?? "").trim();
-        if (!url.startsWith("https://") && !url.startsWith("http://") && !url.startsWith("ipfs://")) {
-          throw new Error("proofURL must start with https://, http://, or ipfs://");
+        if (!url.startsWith("https://") || /\s/.test(url) || url.length < 12 || url.length > 300) {
+          throw new Error("proofURL must be a valid https:// URL (12-300 chars, no whitespace).");
         }
         const rawDigest = String(args.proofDigest ?? "").trim();
         const rawContent = String(args.proofContent ?? "");
@@ -342,7 +386,7 @@ export async function executeMcpTool(
         const summary = String(args.summary ?? "").trim();
         if (summary.length < 6) throw new Error("summary must be at least 6 characters.");
         const bounty = realm.bounties.get(id);
-        if (!bounty) throw new Error(`Bounty #${id} was not found on-chain.`);
+        if (!bounty) throw new Error(`Bounty #${id} was not found in simulator state.`);
         if (bounty.status !== "claimed") {
           throw new Error(`Bounty #${id} is "${bounty.status}", expected "claimed" before submitting proof.`);
         }
@@ -368,7 +412,7 @@ export async function executeMcpTool(
           throw new Error("rating must be an integer between 1 and 5.");
         }
         const bounty = realm.bounties.get(id);
-        if (!bounty) throw new Error(`Bounty #${id} was not found on-chain.`);
+        if (!bounty) throw new Error(`Bounty #${id} was not found in simulator state.`);
         if (bounty.status !== "submitted") {
           throw new Error(`Bounty #${id} is "${bounty.status}", expected "submitted" before settling.`);
         }
@@ -384,6 +428,53 @@ export async function executeMcpTool(
             chainId,
             "ApproveAndSettle",
             [String(id), String(rating), String(args.reviewNote ?? "").trim()],
+            undefined,
+            `bounty/${id}`,
+            String(args.keyName ?? "<your-key>"),
+          ),
+        };
+        break;
+      }
+      case "hearth_prepare_expire_submission": {
+        const id = Number(args.id ?? 0);
+        const bounty = realm.bounties.get(id);
+        if (!bounty) throw new Error(`Bounty #${id} was not found in simulator state.`);
+        if (bounty.status !== "submitted") {
+          throw new Error(`Bounty #${id} is "${bounty.status}", expected "submitted" for ExpireSubmission.`);
+        }
+        response = {
+          bountyId: bounty.id,
+          claimant: bounty.claimant,
+          reviewDeadlineHeight: bounty.reviewDeadlineHeight,
+          payoutUgnot: bounty.escrowUgnot,
+          payoutFormatted: formatGNOT(bounty.escrowUgnot),
+          transaction: buildPreparedTx(
+            chainId,
+            "ExpireSubmission",
+            [String(id)],
+            undefined,
+            `bounty/${id}`,
+            String(args.keyName ?? "<your-key>"),
+          ),
+        };
+        break;
+      }
+      case "hearth_prepare_expire_dispute": {
+        const id = Number(args.id ?? 0);
+        const bounty = realm.bounties.get(id);
+        if (!bounty) throw new Error(`Bounty #${id} was not found in simulator state.`);
+        if (bounty.status !== "disputed") {
+          throw new Error(`Bounty #${id} is "${bounty.status}", expected "disputed" for ExpireDispute.`);
+        }
+        response = {
+          bountyId: bounty.id,
+          disputeDeadlineHeight: bounty.disputeDeadlineHeight,
+          escrowUgnot: bounty.escrowUgnot,
+          fallbackSplitBps: 5000,
+          transaction: buildPreparedTx(
+            chainId,
+            "ExpireDispute",
+            [String(id)],
             undefined,
             `bounty/${id}`,
             String(args.keyName ?? "<your-key>"),

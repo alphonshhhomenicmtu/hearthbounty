@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Automated Gno.land Onyx Testnet (onyx-1) deployment script for HearthBounty.
+# Automated Gno.land Onyx Testnet (onyx-1) deployment script for HearthBounty v1 + HearthGuild v0.
 # Never reads or exports private keys directly; delegates signing cleanly to gnokey.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -13,9 +13,9 @@ GNOKEY_BIN="${GNOKEY_BIN:-$(command -v gnokey || echo "$ROOT_DIR/.tools/bin/gnok
 CHAIN_ID="${GNO_CHAIN_ID:-onyx-1}"
 RPC_URL="${GNO_RPC_URL:-https://rpc.onyx.testnets.gno.land:443}"
 GNOWEB_URL="${GNO_GNOWEB_URL:-https://onyx.testnets.gno.land}"
-GAS_FEE="${GNO_GAS_FEE:-150000ugnot}"
-GAS_WANTED="${GNO_GAS_WANTED:-120000000}"
-MAX_DEPOSIT="${GNO_MAX_DEPOSIT:-50000000ugnot}"
+GAS_FEE="${GNO_GAS_FEE:-200000ugnot}"
+GAS_WANTED="${GNO_GAS_WANTED:-150000000}"
+MAX_DEPOSIT="${GNO_MAX_DEPOSIT:-100000000ugnot}"
 KEY_NAME="${GNO_KEY_NAME:-}"
 NAMESPACE="${GNO_NAMESPACE:-}"
 
@@ -27,11 +27,6 @@ fi
 if [[ -z "$KEY_NAME" ]]; then
   echo "Usage:"
   echo "  GNO_KEY_NAME=<your-gnokey-name> GNO_NAMESPACE=<your-g1-address-or-handle> $0"
-  echo ""
-  echo "Quick setup on Onyx testnet:"
-  echo "  1. Create a fresh testnet key: gnokey add my-testnet-key"
-  echo "  2. Fund it with testnet ugnot: https://faucet.gno.land"
-  echo "  3. Deploy: GNO_KEY_NAME=my-testnet-key GNO_NAMESPACE=<g1-addr> $0"
   exit 1
 fi
 
@@ -46,14 +41,14 @@ if [[ -n "$NAMESPACE" ]]; then
   "$ROOT_DIR/scripts/set-namespace.sh" "$NAMESPACE"
 fi
 
-ACTIVE_NS="$(grep -E '^module\s*=' "$ROOT_DIR"/r/*/hearthbounty/v0/gnomod.toml | head -n 1 | sed -E 's/.*"gno\.land\/r\/([^/]+)\/hearthbounty\/v0".*/\1/')"
+ACTIVE_NS="$(grep -E '^module\s*=' "$ROOT_DIR"/r/*/hearthbounty/v1/gnomod.toml | head -n 1 | sed -E 's/.*"gno\.land\/r\/([^/]+)\/hearthbounty\/v1".*/\1/')"
 PKG_CORE="gno.land/p/${ACTIVE_NS}/hearthcore/v0"
-PKG_BOARD="gno.land/r/${ACTIVE_NS}/hearthbounty/v0"
+PKG_BOARD="gno.land/r/${ACTIVE_NS}/hearthbounty/v1"
+PKG_GUILD="gno.land/r/${ACTIVE_NS}/hearthguild/v0"
 
 echo "==> [3/6] Running local Gno tests and lint before broadcast"
-(cd "$ROOT_DIR" && "$GNO_BIN" test ./p/... ./r/... && "$GNO_BIN" lint ./p/... ./r/...)
+(cd "$ROOT_DIR" && "$GNO_BIN" test -root-dir "$GNOROOT" ./p/... ./r/... && "$GNO_BIN" lint -root-dir "$GNOROOT" ./p/... ./r/...)
 
-echo "==> [4/6] Deploying pure package: $PKG_CORE"
 run_addpkg() {
   local pkgpath="$1"
   local pkgdir="$2"
@@ -83,33 +78,22 @@ run_addpkg() {
   fi
 }
 
-run_addpkg "$PKG_CORE" "$ROOT_DIR/p/${ACTIVE_NS}/hearthcore/v0"
+echo "==> [4/6] Deploying pure package (if absent): $PKG_CORE"
+if ! "$GNOKEY_BIN" query vm/qpkgmeta_json -data "$PKG_CORE" -remote "$RPC_URL" 2>/dev/null | grep -q '"status":"live"'; then
+  run_addpkg "$PKG_CORE" "$ROOT_DIR/p/${ACTIVE_NS}/hearthcore/v0"
+else
+  echo "    $PKG_CORE is already live on $CHAIN_ID."
+fi
 
-echo "==> Waiting for $PKG_CORE to transition from inert to live..."
-for _ in $(seq 1 30); do
-  META="$("$GNOKEY_BIN" query vm/qpkgmeta_json -data "$PKG_CORE" -remote "$RPC_URL" 2>/dev/null || true)"
-  if echo "$META" | grep -q '"status":"live"'; then
-    echo "    $PKG_CORE is LIVE!"
-    break
-  fi
-  sleep 2
-done
+echo "==> [5/6] Deploying hardened stateful realm (1:1 wugnot grc20reg): $PKG_BOARD"
+run_addpkg "$PKG_BOARD" "$ROOT_DIR/r/${ACTIVE_NS}/hearthbounty/v1"
 
-echo "==> [5/6] Deploying stateful realm: $PKG_BOARD"
-run_addpkg "$PKG_BOARD" "$ROOT_DIR/r/${ACTIVE_NS}/hearthbounty/v0"
-
-echo "==> [6/6] Verifying live status & Render() on $CHAIN_ID"
-for _ in $(seq 1 30); do
-  META="$("$GNOKEY_BIN" query vm/qpkgmeta_json -data "$PKG_BOARD" -remote "$RPC_URL" 2>/dev/null || true)"
-  if echo "$META" | grep -q '"status":"live"'; then
-    echo "    $PKG_BOARD is LIVE!"
-    break
-  fi
-  sleep 2
-done
+echo "==> [6/6] Deploying companion consumer realm (imports hearthcore/v0 + hearthbounty/v1): $PKG_GUILD"
+run_addpkg "$PKG_GUILD" "$ROOT_DIR/r/${ACTIVE_NS}/hearthguild/v0"
 
 echo ""
-echo "Deployment complete!"
-echo "  Pure Package: ${GNOWEB_URL}/p/${ACTIVE_NS}/hearthcore/v0"
-echo "  Live Realm:   ${GNOWEB_URL}/r/${ACTIVE_NS}/hearthbounty/v0"
-echo "  MCP Config:   HEARTH_RPC_URL=${RPC_URL} HEARTH_CHAIN_ID=${CHAIN_ID} HEARTH_REALM_PATH=${PKG_BOARD}"
+echo "Deployment broadcast complete (Onyx GPAO auto-enables non-banker realms in ~60 min):"
+echo "  Pure Package:    ${GNOWEB_URL}/p/${ACTIVE_NS}/hearthcore/v0"
+echo "  Bounty Realm v1: ${GNOWEB_URL}/r/${ACTIVE_NS}/hearthbounty/v1"
+echo "  Guild Consumer:  ${GNOWEB_URL}/r/${ACTIVE_NS}/hearthguild/v0"
+echo "  MCP Config:      HEARTH_RPC_URL=${RPC_URL} HEARTH_CHAIN_ID=${CHAIN_ID} HEARTH_REALM_PATH=${PKG_BOARD}"

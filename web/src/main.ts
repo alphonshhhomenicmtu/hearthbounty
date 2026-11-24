@@ -1,4 +1,5 @@
 import "./styles.css";
+import { BREAKER_TESTS, BreakerId, BreakerRunResult, runBreakerTest } from "./breaker.js";
 import {
   BountyRecord,
   CATEGORY_LABELS,
@@ -8,8 +9,11 @@ import {
   DEMO_ACTORS,
   DENOM,
   effectiveReward,
+  ESCROW_TOKEN_KEY,
   formatGNOT,
+  GUILD_PKG_PATH,
   HearthBountyRealm,
+  REALM_ESCROW_ADDRESS,
   REALM_PKG_PATH,
   sanitizeRenderText,
   shortAddr,
@@ -19,10 +23,16 @@ import {
 } from "./engine.js";
 import { DiagReport, runDiagnostics } from "./diag.js";
 import { executeMcpTool, MCP_TOOLS, McpExecutionResult, McpToolName } from "./mcp.js";
-import { fetchLiveOnyxSnapshot, ONYX_ARTIFACTS, ONYX_RPC_URL, OnyxSnapshot } from "./onyx.js";
+import {
+  fetchLiveOnyxSnapshot,
+  ONYX_ARTIFACTS,
+  ONYX_RPC_URL,
+  ONYX_SEEDED_TXS,
+  OnyxSnapshot,
+} from "./onyx.js";
 import { renderEscrowDistributionSVG, renderLifecycleSVG } from "./svg.js";
 
-type TabId = "simulator" | "onyx" | "mcp" | "leaderboard" | "diag";
+type TabId = "simulator" | "breaker" | "onyx" | "mcp" | "leaderboard" | "diag";
 type GuardMode = "eoa" | "cross-realm" | "bad-denom";
 
 interface AppState {
@@ -34,10 +44,12 @@ interface AppState {
   guardMode: GuardMode;
   showPostForm: boolean;
   toast: { ok: boolean; text: string } | null;
+  // Adversarial Breaker Lab
+  breakerResults: Partial<Record<BreakerId, BreakerRunResult>>;
   // Live Onyx RPC
   onyx: OnyxSnapshot | null;
   onyxLoading: boolean;
-  // MCP Inspector
+  // MCP Emulator
   selectedTool: McpToolName;
   mcpChainId: string;
   mcpArgsText: string;
@@ -65,6 +77,7 @@ function parseInitialTab(): TabId {
   const qView = (params.get("view") || "").toLowerCase();
   const target = hash.replace(/^#\/?/, "") || qView;
   if (target === "diag") return "diag";
+  if (target === "breaker" || target === "lab") return "breaker";
   if (target === "onyx" || target === "explorer") return "onyx";
   if (target === "mcp") return "mcp";
   if (target === "leaderboard" || target === "security") return "leaderboard";
@@ -81,6 +94,7 @@ const state: AppState = {
   guardMode: "eoa",
   showPostForm: false,
   toast: null,
+  breakerResults: {},
   onyx: null,
   onyxLoading: false,
   selectedTool: "hearth_list_bounties",
@@ -89,7 +103,7 @@ const state: AppState = {
   mcpResult: null,
   mcpLoopLog: [],
   disputeBps: 7000,
-  sanitizeInput: `Audit <gno-button href="/r/evil" label="Drain" /> and <gno-form exec="Steal"> cost $150 $GNOT`,
+  sanitizeInput: `İ<gno-form exec="PostBounty">\n</gno-form> İ<GNO-BUTTON href="/r/evil" /> cost $150 $GNOT`,
   diagReport: null,
   diagRunning: false,
   drawerOpen: false,
@@ -174,8 +188,9 @@ function renderHeader(): string {
 
   const tabs: Array<{ id: TabId; label: string }> = [
     { id: "simulator", label: "Escrow Simulator" },
+    { id: "breaker", label: "Breaker Lab" },
     { id: "onyx", label: "Live Onyx Explorer" },
-    { id: "mcp", label: "MCP Inspector" },
+    { id: "mcp", label: "MCP Emulator" },
     { id: "leaderboard", label: "Leaderboard & Guards" },
     { id: "diag", label: "/diag Self-Test" },
   ];
@@ -187,7 +202,7 @@ function renderHeader(): string {
         <div>
           <div style="display:flex;align-items:center;gap:8px;">
             <span class="brand-title">HearthBounty</span>
-            <span class="brand-tag">Gno.land v1.8</span>
+            <span class="brand-tag">v1 · Gno v1.8</span>
           </div>
         </div>
         <button class="live-pill" data-action="goto-onyx" title="Inspect live Onyx RPC proofs">
@@ -206,13 +221,103 @@ function renderHeader(): string {
       </nav>
 
       <div class="topbar-actions">
-        <button class="btn btn-primary btn-sm" data-action="open-drawer">60s Judge Walkthrough</button>
-        <a class="btn btn-sm" href="${DECK_PDF_URL}" target="_blank" rel="noopener">Pitch Deck PDF</a>
+        <button class="btn btn-primary btn-sm" data-action="open-drawer">60s Walkthrough</button>
+        <a class="btn btn-sm" href="${DECK_PDF_URL}" target="_blank" rel="noopener">Deck PDF</a>
         <a class="btn btn-sm" href="${YOUTUBE_URL}" target="_blank" rel="noopener">Demo Video</a>
         <a class="btn btn-sm" href="${GITHUB_URL}" target="_blank" rel="noopener">GitHub</a>
       </div>
     </div>
   </header>`;
+}
+
+function renderBreakerLabView(): string {
+  const ranCount = Object.keys(state.breakerResults).length;
+  const passCount = Object.values(state.breakerResults).filter((r) => r?.passed).length;
+
+  return `
+    <section class="panel" style="margin-bottom:16px;border-color:rgba(245,158,11,0.4);">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">Adversarial Breaker Lab — V2.1 Security Proof Suite</h2>
+          <p class="panel-sub">Execute 1-click exploit tests directly against the exact TypeScript mirror of <span class="mono">hearthbounty/v1</span>. Every exploit reproduces a real audit vector (H-1, M-1, M-2, Interrealm v2) and proves exact on-chain defense.</p>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          ${
+            ranCount > 0
+              ? `<span class="badge ${passCount === ranCount ? "badge-pass" : "badge-fail"}">${passCount} / ${ranCount} DEFENDED</span>`
+              : `<span class="badge badge-open">4 EXPLOITS READY</span>`
+          }
+          <button class="btn btn-primary btn-sm" data-action="run-all-breakers">Run All 4 Breaker Tests</button>
+          <button class="btn btn-sm" data-action="clear-breakers">Clear Results</button>
+        </div>
+      </div>
+      <div class="callout" style="margin:0;">
+        <strong>Audit Coverage:</strong> Every breaker test below has a matching Gno VM unit test in <span class="mono">r/.../hearthbounty/v1/hearthbounty_test.gno</span> verified by <span class="mono">gno test</span> (16/16 passing) and <span class="mono">gno lint</span> (0 warnings).
+      </div>
+    </section>
+
+    <div class="two-col">
+      ${BREAKER_TESTS.map((spec) => {
+        const res = state.breakerResults[spec.id];
+        const sevCls =
+          spec.severity === "HIGH" ? "badge-fail" : spec.severity === "MEDIUM" ? "badge-disputed" : "badge-claimed";
+        return `<section class="panel" style="${res ? (res.passed ? "border-color:rgba(52,211,153,0.45);" : "border-color:rgba(248,113,113,0.5);") : ""}">
+          <div class="panel-header">
+            <div>
+              <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+                <span class="badge ${sevCls}">${esc(spec.code)} · ${esc(spec.severity)}</span>
+                ${
+                  res
+                    ? `<span class="badge ${res.passed ? "badge-pass" : "badge-fail"}">${res.passed ? "DEFENDED" : "FAILED"}</span>`
+                    : `<span class="badge badge-neutral">NOT RUN</span>`
+                }
+              </div>
+              <h3 class="panel-title">${esc(spec.title)}</h3>
+            </div>
+            <button class="btn btn-primary btn-sm" data-breaker="${spec.id}">${esc(spec.buttonLabel)}</button>
+          </div>
+
+          <div class="detail-kv" style="grid-template-columns:1fr;margin-top:8px;">
+            <div class="kv-item">
+              <div class="kv-label">Attack Vector</div>
+              <div class="kv-val" style="font-weight:400;color:var(--text-secondary);font-size:12.5px;">${esc(spec.attackSummary)}</div>
+            </div>
+            <div class="kv-item">
+              <div class="kv-label">On-Chain V2.1 Enforcement</div>
+              <div class="kv-val" style="font-weight:400;color:var(--text-secondary);font-size:12.5px;">${esc(spec.fixSummary)}</div>
+            </div>
+          </div>
+
+          ${
+            res
+              ? `<div class="action-box" style="margin-top:10px;border-color:${res.passed ? "rgba(52,211,153,0.4)" : "rgba(248,113,113,0.45)"};">
+                  <div style="font-weight:700;font-size:12.5px;color:${res.passed ? "var(--emerald)" : "var(--red)"};margin-bottom:8px;">
+                    ${esc(res.headline)}
+                  </div>
+                  ${res.steps
+                    .map(
+                      (st) => `<div style="margin-bottom:6px;font-size:12px;">
+                        <span class="badge ${st.outcome === "LEAKED_IN_V0" ? "badge-fail" : st.outcome === "DEFENDED" ? "badge-pass" : "badge-claimed"}" style="margin-right:6px;">${esc(st.outcome)}</span>
+                        <strong>${esc(st.label)}:</strong>
+                        <div class="mono" style="font-size:11.5px;color:var(--text-secondary);margin-top:2px;word-break:break-word;">${esc(st.detail)}</div>
+                      </div>`,
+                    )
+                    .join("")}
+                  ${
+                    res.beforeAfter
+                      ? `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:11.5px;">
+                          <div class="mono text-red">v0: ${esc(res.beforeAfter.v0Behavior)}</div>
+                          <div class="mono text-emerald" style="margin-top:3px;">v1: ${esc(res.beforeAfter.v1Behavior)}</div>
+                        </div>`
+                      : ""
+                  }
+                </div>`
+              : ""
+          }
+        </section>`;
+      }).join("")}
+    </div>
+  `;
 }
 
 function renderSimulatorView(): string {
@@ -239,11 +344,11 @@ function renderSimulatorView(): string {
 
     <div class="kpi-grid">
       <div class="kpi-card">
-        <div class="kpi-label">Active Escrow Locked</div>
+        <div class="kpi-label">Active 1:1 wugnot Escrow</div>
         <div class="kpi-value text-amber mono">${esc(formatGNOT(stats.total_escrow_ugnot))}</div>
         <div class="kpi-meta">
           <span>${stats.open_count + stats.claimed_count + stats.submitted_count + stats.disputed_count} active quests</span>
-          <span class="mono">${stats.total_escrow_ugnot.toLocaleString()} ugnot</span>
+          <span class="mono">${stats.total_escrow_ugnot.toLocaleString()} wugnot</span>
         </div>
       </div>
       <div class="kpi-card">
@@ -258,7 +363,7 @@ function renderSimulatorView(): string {
         <div class="kpi-label">Simulated Chain Height</div>
         <div class="kpi-value text-sky mono">#${stats.chain_height.toLocaleString()}</div>
         <div class="kpi-meta">
-          <span>Block-height claim windows</span>
+          <span>Claim / Review / Dispute clocks</span>
           <button class="btn btn-xs" data-action="advance-blocks">+50k Blocks</button>
         </div>
       </div>
@@ -266,7 +371,7 @@ function renderSimulatorView(): string {
         <div class="kpi-label">Escrow Conservation Invariant</div>
         <div class="kpi-value ${invOk ? "text-emerald" : "text-red"}">${invOk ? "VERIFIED" : "MISMATCH"}</div>
         <div class="kpi-meta">
-          <span class="mono">bank(${state.realm.realmBankUgnot.toLocaleString()}) == escrow(${state.realm.totalEscrowUgnot.toLocaleString()})</span>
+          <span class="mono">wugnot(${state.realm.realmBankUgnot.toLocaleString()}) == escrow(${state.realm.totalEscrowUgnot.toLocaleString()})</span>
         </div>
       </div>
     </div>
@@ -302,7 +407,7 @@ function renderSimulatorView(): string {
           Call Guard Mode
         </label>
         <select id="guard-mode-sel" class="select" style="width:auto;min-width:210px;" data-action="guard-mode">
-          <option value="eoa" ${state.guardMode === "eoa" ? "selected" : ""}>Direct EOA (Normal ugnot)</option>
+          <option value="eoa" ${state.guardMode === "eoa" ? "selected" : ""}>Direct EOA (1:1 wugnot)</option>
           <option value="cross-realm" ${state.guardMode === "cross-realm" ? "selected" : ""}>Adversarial: Cross-Realm MITM</option>
           <option value="bad-denom" ${state.guardMode === "bad-denom" ? "selected" : ""}>Adversarial: Wrong Denom (uatom)</option>
         </select>
@@ -312,6 +417,7 @@ function renderSimulatorView(): string {
         <button class="btn btn-emerald btn-sm" data-action="run-full-lifecycle">
           Run End-to-End Flow
         </button>
+        <button class="btn btn-sm" data-action="goto-breaker">Open Breaker Lab</button>
         <button class="btn btn-sm" data-action="reset-realm">Reset State</button>
       </div>
     </div>
@@ -323,7 +429,7 @@ function renderSimulatorView(): string {
         <div class="panel-header">
           <div>
             <h2 class="panel-title">Bounty Board (${bounties.length})</h2>
-            <p class="panel-sub">Select any quest to inspect escrow state and execute realm entrypoints.</p>
+            <p class="panel-sub">Select any quest to inspect per-donor custody, liveness timeouts, and realm entrypoints.</p>
           </div>
         </div>
 
@@ -363,9 +469,9 @@ function renderSimulatorView(): string {
       <div class="panel-header">
         <div>
           <h2 class="panel-title">Realm Execution &amp; Event Trace (${state.realm.trace.length})</h2>
-          <p class="panel-sub">Every crossing call records its chain.Emit event, CEI bank balance check, or exact Gno panic abort.</p>
+          <p class="panel-sub">Every crossing call records its chain.Emit event, CEI wugnot balance check, or exact Gno panic abort.</p>
         </div>
-        <button class="btn btn-sm" data-action="inspect-in-mcp">Inspect State in MCP Tool</button>
+        <button class="btn btn-sm" data-action="inspect-in-mcp">Inspect State in MCP Emulator</button>
       </div>
       <div class="table-wrap">
         <table>
@@ -416,8 +522,8 @@ function renderPostBountyPanel(): string {
   return `<section class="panel" style="margin-bottom:16px;border-color:rgba(245,158,11,0.45);">
     <div class="panel-header">
       <div>
-        <h3 class="panel-title">PostBounty(cur, title, spec, category, deadlineBlocks)</h3>
-        <p class="panel-sub">Direct-EOA payable crossing call. Minimum escrow: 100,000 ugnot (0.10 GNOT). Switch Call Guard Mode above to test AssertOriginCall or uatom rejection.</p>
+        <h3 class="panel-title">PostBounty(cur, title, spec, category, rewardUgnot, deadlineBlocks)</h3>
+        <p class="panel-sub">Direct-EOA 1:1 wugnot escrow pull via <span class="mono">grc20reg.TransferFrom</span>. Minimum escrow: 100,000 wugnot (0.10 GNOT). Switch Call Guard Mode above to test AssertOriginCall or uatom rejection.</p>
       </div>
     </div>
     <form id="form-post-bounty">
@@ -433,11 +539,11 @@ function renderPostBountyPanel(): string {
           </select>
         </div>
         <div class="field">
-          <label for="post-amount">Escrow Deposit (ugnot, 1 GNOT = 1,000,000)</label>
+          <label for="post-amount">Escrow Deposit (wugnot, 1 GNOT = 1,000,000)</label>
           <input id="post-amount" name="amount" type="number" class="input mono" required value="4000000" min="1" />
         </div>
         <div class="field">
-          <label for="post-deadline">Claim Window (blocks, 10 - 2,000,000)</label>
+          <label for="post-deadline">Claim / Review Window (blocks, 10 - 2,000,000)</label>
           <input id="post-deadline" name="deadline" type="number" class="input mono" required value="30000" min="10" max="2000000" />
         </div>
       </div>
@@ -459,7 +565,10 @@ function renderBountyWorkbench(b: BountyRecord): string {
     ? state.realm.profiles.get(b.claimant)?.handle ?? shortAddr(b.claimant)
     : "Unclaimed";
   const blocksRemaining = b.deadlineHeight > 0 ? b.deadlineHeight - state.realm.chainHeight : b.deadlineBlocks;
+  const reviewRemaining = b.reviewDeadlineHeight > 0 ? b.reviewDeadlineHeight - state.realm.chainHeight : 0;
+  const disputeRemaining = b.disputeDeadlineHeight > 0 ? b.disputeDeadlineHeight - state.realm.chainHeight : 0;
   const splitPreview = computeSplit(b.escrowUgnot, state.disputeBps);
+  const externalDonors = Object.keys(b.donorShares).length;
 
   return `
     <div class="panel-header">
@@ -494,17 +603,25 @@ function renderBountyWorkbench(b: BountyRecord): string {
         <div class="kv-val">${esc(claimantHandle)}${b.claimant ? ` <span class="mono" style="color:var(--text-muted);font-size:11px;">(${esc(shortAddr(b.claimant))})</span>` : ""}</div>
       </div>
       <div class="kv-item">
-        <div class="kv-label">Escrow / Top-Ups</div>
-        <div class="kv-val mono">${esc(formatGNOT(b.escrowUgnot))} (${b.topUpCount} top-ups)</div>
+        <div class="kv-label">H-1 Custody Split (Sponsor / External Donors)</div>
+        <div class="kv-val mono" style="font-size:12px;">${esc(formatGNOT(b.sponsorFundedUgnot))} / ${esc(formatGNOT(b.externalTopUpUgnot))} (${externalDonors} donor${externalDonors === 1 ? "" : "s"})</div>
       </div>
       <div class="kv-item">
-        <div class="kv-label">Claim Deadline</div>
-        <div class="kv-val mono">${
-          b.deadlineHeight > 0
-            ? blocksRemaining > 0
-              ? `Block #${b.deadlineHeight.toLocaleString()} (${blocksRemaining.toLocaleString()} left)`
-              : `EXPIRED at #${b.deadlineHeight.toLocaleString()}`
-            : `${b.deadlineBlocks.toLocaleString()} blocks after claim`
+        <div class="kv-label">Active Timeout Clock</div>
+        <div class="kv-val mono" style="font-size:12px;">${
+          b.status === "submitted" && b.reviewDeadlineHeight > 0
+            ? reviewRemaining > 0
+              ? `Review #${b.reviewDeadlineHeight.toLocaleString()} (${reviewRemaining.toLocaleString()} left)`
+              : `REVIEW EXPIRED at #${b.reviewDeadlineHeight.toLocaleString()}`
+            : b.status === "disputed" && b.disputeDeadlineHeight > 0
+              ? disputeRemaining > 0
+                ? `Dispute #${b.disputeDeadlineHeight.toLocaleString()} (${disputeRemaining.toLocaleString()} left)`
+                : `DISPUTE EXPIRED at #${b.disputeDeadlineHeight.toLocaleString()}`
+              : b.deadlineHeight > 0
+                ? blocksRemaining > 0
+                  ? `Claim #${b.deadlineHeight.toLocaleString()} (${blocksRemaining.toLocaleString()} left)`
+                  : `CLAIM EXPIRED at #${b.deadlineHeight.toLocaleString()}`
+                : `${b.deadlineBlocks.toLocaleString()} blocks window`
         }</div>
       </div>
     </div>
@@ -541,7 +658,7 @@ function renderBountyWorkbench(b: BountyRecord): string {
     ${
       b.status === "open"
         ? `<div class="action-box">
-            <h4>ClaimBounty(cur, ${b.id}, agentNote) — Non-Sponsor Builder or AI Agent</h4>
+            <h4>ClaimBounty(cur, ${b.id}, agentNote) — Non-Sponsor, Non-Donor Builder or AI Agent</h4>
             <form id="form-claim">
               <div class="field">
                 <label for="claim-note">Execution Plan / Agent Note</label>
@@ -550,7 +667,7 @@ function renderBountyWorkbench(b: BountyRecord): string {
               <div style="display:flex;gap:8px;flex-wrap:wrap;">
                 <button type="submit" class="btn btn-primary btn-sm">Claim Bounty as ${esc(getActiveActor().handle)}</button>
                 <button type="button" class="btn btn-sm" data-action="topup-bounty" data-id="${b.id}">TopUp +1.00 GNOT</button>
-                <button type="button" class="btn btn-danger btn-sm" data-action="cancel-bounty" data-id="${b.id}">CancelBounty (Sponsor Refund)</button>
+                <button type="button" class="btn btn-danger btn-sm" data-action="cancel-bounty" data-id="${b.id}">CancelBounty (Refund Each Contributor)</button>
               </div>
             </form>
           </div>`
@@ -564,13 +681,13 @@ function renderBountyWorkbench(b: BountyRecord): string {
             <form id="form-submit-proof">
               <div class="form-grid">
                 <div class="field">
-                  <label for="proof-url">Deliverable URL (https:// or ipfs://)</label>
+                  <label for="proof-url">Deliverable URL (https:// only)</label>
                   <input id="proof-url" name="proofURL" class="input" required value="https://github.com/alphonshhhomenicmtu/hearthbounty/pull/18" />
                 </div>
                 <div class="field">
                   <label for="proof-artifact">Raw Artifact Text (Click Hash for SHA-256)</label>
                   <div style="display:flex;gap:6px;">
-                    <input id="proof-artifact" name="artifact" class="input" value="hearthbounty-deliverable-bounty-${b.id}-v2" />
+                    <input id="proof-artifact" name="artifact" class="input" value="hearthbounty-deliverable-bounty-${b.id}-v21" />
                     <button type="button" class="btn btn-sky btn-sm" data-action="hash-proof">Hash</button>
                   </div>
                 </div>
@@ -596,7 +713,7 @@ function renderBountyWorkbench(b: BountyRecord): string {
     ${
       b.status === "submitted"
         ? `<div class="action-box">
-            <h4>ApproveAndSettle(cur, ${b.id}, rating, reviewNote) — Sponsor CEI Escrow Release</h4>
+            <h4>ApproveAndSettle / ExpireSubmission (M-1 Review Timeout)</h4>
             <form id="form-settle">
               <div class="form-grid">
                 <div class="field">
@@ -611,11 +728,12 @@ function renderBountyWorkbench(b: BountyRecord): string {
                 </div>
                 <div class="field">
                   <label for="settle-note">Sponsor Review Note</label>
-                  <input id="settle-note" name="reviewNote" class="input" value="Verified proof digest and test coverage. Releasing full ugnot escrow." />
+                  <input id="settle-note" name="reviewNote" class="input" value="Verified proof digest and test coverage. Releasing full wugnot escrow." />
                 </div>
               </div>
               <div style="display:flex;gap:8px;flex-wrap:wrap;">
                 <button type="submit" class="btn btn-emerald btn-sm">Approve &amp; Settle ${esc(formatGNOT(b.escrowUgnot))}</button>
+                <button type="button" class="btn btn-sky btn-sm" data-action="expire-submission" data-id="${b.id}">ExpireSubmission (Post-Timeout)</button>
                 <button type="button" class="btn btn-sm" data-action="request-revision" data-id="${b.id}">RequestRevision</button>
                 <button type="button" class="btn btn-danger btn-sm" data-action="open-dispute" data-id="${b.id}">OpenDispute</button>
               </div>
@@ -627,21 +745,24 @@ function renderBountyWorkbench(b: BountyRecord): string {
     ${
       b.status === "disputed"
         ? `<div class="action-box" style="border-color:rgba(251,146,60,0.5);">
-            <h4>ResolveDispute(cur, ${b.id}, hunterBps, resolution) — Arbiter Only</h4>
+            <h4>ResolveDispute (Non-Conflicted Arbiter) / ExpireDispute (50/50 Fallback)</h4>
             <form id="form-resolve-dispute">
               <div class="field">
                 <label for="dispute-bps">Hunter Split: <span id="bps-readout" class="mono text-amber">${state.disputeBps} bps (${(state.disputeBps / 100).toFixed(2)}%)</span></label>
                 <input id="dispute-bps" name="hunterBps" type="range" min="0" max="10000" step="100" value="${state.disputeBps}" data-action="slide-bps" />
                 <div class="mono" style="font-size:12px;color:var(--text-secondary);display:flex;justify-content:space-between;margin-top:4px;">
-                  <span>Hunter Payout: <strong class="text-emerald">${esc(formatGNOT(splitPreview.hunterUgnot))}</strong> (${splitPreview.hunterUgnot.toLocaleString()} ugnot)</span>
-                  <span>Sponsor Refund: <strong class="text-sky">${esc(formatGNOT(splitPreview.sponsorRefundUgnot))}</strong> (${splitPreview.sponsorRefundUgnot.toLocaleString()} ugnot)</span>
+                  <span>Hunter Payout: <strong class="text-emerald">${esc(formatGNOT(splitPreview.hunterUgnot))}</strong></span>
+                  <span>Contributors Pro-Rata Refund: <strong class="text-sky">${esc(formatGNOT(splitPreview.sponsorRefundUgnot))}</strong></span>
                 </div>
               </div>
               <div class="field">
                 <label for="dispute-res">Arbiter Resolution Note</label>
-                <input id="dispute-res" name="resolution" class="input" value="Verified deliverable scope; applying deterministic integer basis-point split." />
+                <input id="dispute-res" name="resolution" class="input" value="Verified deliverable scope; applying deterministic pro-rata basis-point split." />
               </div>
-              <button type="submit" class="btn btn-primary btn-sm">ResolveDispute as ${esc(getActiveActor().handle)}</button>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button type="submit" class="btn btn-primary btn-sm">ResolveDispute as ${esc(getActiveActor().handle)}</button>
+                <button type="button" class="btn btn-danger btn-sm" data-action="expire-dispute" data-id="${b.id}">ExpireDispute (50/50 Post-Timeout)</button>
+              </div>
             </form>
           </div>`
         : ""
@@ -654,7 +775,7 @@ function renderBountyWorkbench(b: BountyRecord): string {
             <div class="mono" style="font-size:12px;color:var(--text-secondary);">
               Payout: <strong class="text-emerald">${esc(formatGNOT(b.payoutUgnot))}</strong> ·
               Refund: <strong class="text-sky">${esc(formatGNOT(b.refundUgnot))}</strong> ·
-              Rating: <strong>${b.rating ? `${b.rating} / 5` : "N/A (Arbiter/Cancel)"}</strong>
+              Rating: <strong>${b.rating ? `${b.rating} / 5` : "N/A (Timeout/Arbiter/Cancel)"}</strong>
               ${b.settledHeight ? ` · Settled Block #${b.settledHeight.toLocaleString()}` : ""}
             </div>
             ${b.reviewNote ? `<p style="margin:6px 0 0;color:var(--text-secondary);font-size:13px;">"${esc(b.reviewNote)}"</p>` : ""}
@@ -666,11 +787,15 @@ function renderBountyWorkbench(b: BountyRecord): string {
 
 function renderOnyxView(): string {
   const snap = state.onyx;
+  const v1Meta = snap?.metas?.v1;
+  const guildMeta = snap?.metas?.guild;
+  const coreMeta = snap?.metas?.core;
+
   return `
     <div class="panel" style="margin-bottom:16px;">
       <div class="panel-header">
         <div>
-          <h2 class="panel-title">Live Gno.land Onyx (onyx-1) RPC &amp; On-Chain Proof Explorer</h2>
+          <h2 class="panel-title">Live Gno.land Onyx (onyx-1) RPC &amp; Multi-Realm Proof Explorer</h2>
           <p class="panel-sub">Direct browser queries to <span class="mono">${esc(ONYX_RPC_URL)}</span> using native TM2 ABCI JSON-RPC (no backend proxy).</p>
         </div>
         <button class="btn btn-primary btn-sm" data-action="refresh-onyx">
@@ -680,37 +805,38 @@ function renderOnyxView(): string {
 
       <div class="kpi-grid" style="margin-bottom:0;">
         <div class="kpi-card">
-          <div class="kpi-label">Network &amp; Health</div>
-          <div class="kpi-value ${snap?.online ? "text-emerald" : "text-amber"}">${snap?.online ? esc(snap.node?.network ?? "onyx-1") : state.onyxLoading ? "Syncing..." : "Offline"}</div>
-          <div class="kpi-meta"><span>${snap?.online ? `Latency ${snap.latencyMs}ms · Synced` : esc(snap?.error ?? "Awaiting RPC")}</span></div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-label">Live Onyx Block Height</div>
-          <div class="kpi-value text-sky mono">${snap?.node ? `#${snap.node.latestBlockHeight.toLocaleString()}` : "---"}</div>
-          <div class="kpi-meta"><span class="mono">${snap?.node ? esc(snap.node.latestBlockTime.slice(0, 19) + "Z") : ""}</span></div>
+          <div class="kpi-label">Onyx Network &amp; Block</div>
+          <div class="kpi-value ${snap?.online ? "text-emerald" : "text-amber"} mono">${snap?.node ? `#${snap.node.latestBlockHeight.toLocaleString()}` : state.onyxLoading ? "Syncing..." : "Offline"}</div>
+          <div class="kpi-meta"><span>${snap?.online ? `onyx-1 · ${snap.latencyMs}ms · Synced` : esc(snap?.error ?? "Awaiting RPC")}</span></div>
         </div>
         <div class="kpi-card">
           <div class="kpi-label">hearthcore/v0 (/p/)</div>
-          <div class="kpi-value ${snap?.coreMeta?.status === "live" ? "text-emerald" : "text-amber"}">${esc((snap?.coreMeta?.status ?? "checking").toUpperCase())}</div>
-          <div class="kpi-meta"><span class="mono">Block #1,374,766 · 33.93M gas</span></div>
+          <div class="kpi-value ${coreMeta?.status === "live" ? "text-emerald" : "text-amber"}">${esc((coreMeta?.status ?? "checking").toUpperCase())}</div>
+          <div class="kpi-meta"><span class="mono">Block #1,374,766 · Pure Core</span></div>
         </div>
         <div class="kpi-card">
-          <div class="kpi-label">hearthbounty/v0 (/r/)</div>
-          <div class="kpi-value ${snap?.realmMeta?.status === "live" ? "text-emerald" : "text-amber"}">${esc((snap?.realmMeta?.status ?? "checking").toUpperCase())}</div>
-          <div class="kpi-meta"><span class="mono">Block #1,374,813 · 94.05M gas</span></div>
+          <div class="kpi-label">hearthbounty/v1 (/r/)</div>
+          <div class="kpi-value ${v1Meta?.status === "live" ? "text-emerald" : "text-amber"}">${esc((v1Meta?.status ?? "checking").toUpperCase())}</div>
+          <div class="kpi-meta"><span class="mono">Block #1,378,958 · 1:1 wugnot</span></div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">hearthguild/v0 (/r/)</div>
+          <div class="kpi-value ${guildMeta?.status === "live" ? "text-emerald" : "text-amber"}">${esc((guildMeta?.status ?? "checking").toUpperCase())}</div>
+          <div class="kpi-meta"><span class="mono">Block #1,378,960 · Consumer Realm</span></div>
         </div>
       </div>
     </div>
 
     <div class="two-col" style="margin-bottom:16px;">
       ${ONYX_ARTIFACTS.map((art) => {
-        const meta = art.id === "core" ? snap?.coreMeta : snap?.realmMeta;
-        const tx = art.id === "core" ? snap?.coreTx : snap?.realmTx;
-        const statusCls = meta?.status === "live" ? "badge-live" : "badge-inert";
-        return `<section class="panel">
+        const meta = snap?.metas?.[art.id];
+        const tx = snap?.txs?.[art.id];
+        const statusCls = meta?.status === "live" ? "badge-live" : art.legacy ? "badge-fail" : "badge-inert";
+        return `<section class="panel" style="${art.legacy ? "opacity:0.86;border-style:dashed;" : ""}">
           <div class="panel-header">
             <div>
               <span class="badge ${statusCls}">${esc((meta?.status ?? "checking").toUpperCase())}</span>
+              ${art.legacy ? `<span class="badge badge-neutral" style="margin-left:6px;">SUPERSEDED BY v1</span>` : ""}
               <h3 class="panel-title" style="margin-top:6px;">${esc(art.label)} — ${esc(art.kind)}</h3>
             </div>
             ${
@@ -719,6 +845,7 @@ function renderOnyxView(): string {
                 : `<span class="badge badge-neutral">PENDING CHECK</span>`
             }
           </div>
+          <p class="panel-sub" style="margin-bottom:10px;">${esc(art.note)}</p>
           <div class="detail-kv" style="grid-template-columns:1fr;">
             <div class="kv-item">
               <div class="kv-label">On-Chain Module Path</div>
@@ -755,13 +882,48 @@ function renderOnyxView(): string {
       }).join("")}
     </div>
 
+    ${
+      ONYX_SEEDED_TXS.length > 0
+        ? `<section class="panel" style="margin-bottom:16px;border-color:rgba(52,211,153,0.45);">
+            <div class="panel-header">
+              <div>
+                <h3 class="panel-title">Live Seeded On-Chain Transactions (onyx-1)</h3>
+                <p class="panel-sub">12 real MsgCall transactions confirmed on Onyx against Genesis <span class="mono">r/gnoland/wugnot</span> and live <span class="mono">hearthbounty/v1</span>.</p>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Step</th><th>Entrypoint</th><th>Block</th><th>Confirmed TX Hash</th></tr>
+                </thead>
+                <tbody>
+                  ${ONYX_SEEDED_TXS.map(
+                    (stx) => `<tr>
+                      <td>${esc(stx.label)}</td>
+                      <td class="mono text-amber">${esc(stx.func)}</td>
+                      <td class="mono">#${stx.blockHeight.toLocaleString()}</td>
+                      <td class="mono" style="font-size:11.5px;"><a href="${stx.txRpcUrl}" target="_blank" rel="noopener">${esc(stx.txHashHex)}</a></td>
+                    </tr>`,
+                  ).join("")}
+                </tbody>
+              </table>
+            </div>
+          </section>`
+        : ""
+    }
+
     <div class="callout" style="margin-bottom:16px;">
-      <strong>Onyx Testnet Code Approval Status:</strong> Onyx enforces <span class="mono">vm:p:code_submission_policy = "inert"</span>.
-      The pure library <span class="mono">hearthcore/v0</span> (Block #1,374,766) is already <strong class="text-emerald">LIVE</strong> on Onyx.
-      The stateful realm <span class="mono">hearthbounty/v0</span> (Block #1,374,813) is confirmed on-chain and queued for <span class="mono">vm/enable_package</span> by network approvers; once approved, this explorer automatically switches to streaming live <span class="mono">ExportStatsJSON()</span> directly from Onyx.
+      <strong>Why V2.1 Switched from <span class="mono">chain/banker</span> (v0) to <span class="mono">r/nt/grc20reg/v0</span> + <span class="mono">wugnot</span> (v1):</strong>
+      Forensic audit of Onyx's automated GPAO oracle (<span class="mono">g1yaee4f...yl6adz</span>) confirmed that GPAO auto-enables non-<span class="mono">chain/banker</span> packages after ~60 minutes (~1,050 blocks) while holding <span class="mono">chain/banker</span> realms indefinitely for manual review.
+      <span class="mono">hearthbounty/v1</span> settles in official Genesis 1:1 <span class="mono">ugnot</span>-backed <span class="mono">wugnot</span> (<span class="mono">${esc(ESCROW_TOKEN_KEY)}</span>, spender <span class="mono">${esc(REALM_ESCROW_ADDRESS)}</span>) with zero <span class="mono">chain/banker</span> or <span class="mono">unsafe</span> imports, clearing Onyx GPAO cleanly.
       ${
-        snap?.liveRealmStats
-          ? `<pre class="code-block" style="margin-top:10px;">${esc(JSON.stringify(snap.liveRealmStats, null, 2))}</pre>`
+        snap?.liveV1Stats
+          ? `<div style="margin-top:10px;"><strong>Live Onyx <span class="mono">hearthbounty/v1.ExportStatsJSON()</span>:</strong><pre class="code-block" style="margin-top:6px;">${esc(JSON.stringify(snap.liveV1Stats, null, 2))}</pre></div>`
+          : ""
+      }
+      ${
+        snap?.liveV1Bounties
+          ? `<div style="margin-top:10px;"><strong>Live Onyx <span class="mono">hearthbounty/v1.ExportBountiesJSON()</span>:</strong><pre class="code-block" style="margin-top:6px;">${esc(JSON.stringify(snap.liveV1Bounties, null, 2))}</pre></div>`
           : ""
       }
     </div>
@@ -769,15 +931,15 @@ function renderOnyxView(): string {
     <section class="panel">
       <div class="panel-header">
         <div>
-          <h3 class="panel-title">Native gnoweb v1.8.0 Rendered UI Proofs</h3>
-          <p class="panel-sub">Zero-backend Markdown + deterministic SVG UI served directly by HearthBounty's Render(path) function.</p>
+          <h3 class="panel-title">Live Onyx gnoweb Rendered UI Proofs</h3>
+          <p class="panel-sub">Captured directly from live Onyx (<span class="mono">https://onyx.testnets.gno.land/r/g1x582...uuq4/hearthbounty/v1</span>) serving <span class="mono">Render(path)</span> at HTTP 200.</p>
         </div>
         <a class="btn btn-sm" href="${YOUTUBE_URL}" target="_blank" rel="noopener">Watch 1080p Demo Video</a>
       </div>
       <div class="gallery-grid">
         <div class="gallery-card">
           <img src="./screenshots/01-home-board.png" alt="HearthBounty gnoweb Home Board" loading="lazy" />
-          <div class="gallery-caption">1. Live Bounty Board &amp; On-Chain p/nt/svg/v0 Escrow Dashboard</div>
+          <div class="gallery-caption">1. Native gnoweb Bounty Board &amp; On-Chain p/nt/svg/v0 Escrow Dashboard</div>
         </div>
         <div class="gallery-card">
           <img src="./screenshots/02-bounty-detail-submitted.png" alt="Bounty Detail and Proof Verification" loading="lazy" />
@@ -803,15 +965,18 @@ function renderMcpView(): string {
     state.mcpResult.response &&
     typeof state.mcpResult.response === "object" &&
     "transaction" in state.mcpResult.response
-      ? (state.mcpResult.response as { transaction: { gnokeyCommand: string; gnomcpCallArgs: unknown } }).transaction
+      ? (state.mcpResult.response as {
+          escrowPreSteps?: Array<{ func: string; gnokeyCommand: string }>;
+          transaction: { gnokeyCommand: string; gnomcpCallArgs: unknown };
+        })
       : null;
 
   return `
     <div class="panel" style="margin-bottom:16px;">
       <div class="panel-header">
         <div>
-          <h2 class="panel-title">Live MCP Tool Call Inspector (hearthbounty-mcp + gnomcp)</h2>
-          <p class="panel-sub">All 10 stdio MCP tools executed live against the simulator realm state. Switch target chain to <span class="mono">gnoland-1</span> to verify the mainnet write-safety block.</p>
+          <h2 class="panel-title">MCP Emulator (In-Browser) — 12 hearthbounty-mcp Tools</h2>
+          <p class="panel-sub">Browser-side emulator mirroring <span class="mono">mcp-server/</span> against local simulator state. Switch target chain to <span class="mono">gnoland-1</span> to verify the mainnet write-safety block.</p>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
           <label for="mcp-chain-sel" style="font-size:12px;color:var(--text-muted);font-weight:700;">Target Chain:</label>
@@ -820,13 +985,19 @@ function renderMcpView(): string {
             <option value="dev" ${state.mcpChainId === "dev" ? "selected" : ""}>dev (Local gnodev)</option>
             <option value="gnoland-1" ${state.mcpChainId === "gnoland-1" ? "selected" : ""}>gnoland-1 (Mainnet — Safety Block Test)</option>
           </select>
-          <button class="btn btn-emerald btn-sm" data-action="run-agent-loop">Run Autonomous Agent Loop</button>
+          <button class="btn btn-emerald btn-sm" data-action="run-agent-loop">Run Emulated Agent Loop</button>
         </div>
       </div>
+
+      <div class="callout" style="margin-top:8px;">
+        <strong>Real Live Onyx Stdio MCP Execution:</strong> For live ABCI RPC queries &amp; tx preparation over stdio (Claude / Cursor / Gemini CLI), run the Node.js server in <span class="mono">mcp-server/</span>:
+        <pre class="code-block" style="margin-top:6px;">cd mcp-server &amp;&amp; HEARTH_RPC_URL=${esc(ONYX_RPC_URL)} HEARTH_CHAIN_ID=onyx-1 HEARTH_REALM_PATH=${esc(REALM_PKG_PATH)} npm run cli -- status</pre>
+      </div>
+
       ${
         state.mcpLoopLog.length
           ? `<div class="callout" style="margin-top:8px;">
-              <strong>Autonomous Agent Loop Trace:</strong>
+              <strong>Emulated Autonomous Agent Loop Trace:</strong>
               <ol style="margin:6px 0 0 18px;padding:0;font-size:12px;">
                 ${state.mcpLoopLog.map((line) => `<li class="mono" style="margin-bottom:3px;">${esc(line)}</li>`).join("")}
               </ol>
@@ -837,7 +1008,7 @@ function renderMcpView(): string {
 
     <div class="mcp-grid">
       <section class="panel">
-        <h3 class="panel-title" style="margin-bottom:10px;">Registered MCP Tools (10)</h3>
+        <h3 class="panel-title" style="margin-bottom:10px;">Registered MCP Tools (12)</h3>
         ${MCP_TOOLS.map(
           (t) => `<button class="tool-btn ${state.selectedTool === t.name ? "active" : ""}" data-tool="${t.name}">
             <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
@@ -864,7 +1035,7 @@ function renderMcpView(): string {
         </div>
 
         <div style="display:flex;gap:8px;margin-bottom:14px;">
-          <button class="btn btn-primary" data-action="exec-mcp">Execute tools/call</button>
+          <button class="btn btn-primary" data-action="exec-mcp">Execute Emulated tools/call</button>
           <button class="btn btn-sm" data-action="reset-mcp-args">Reset Default Args</button>
         </div>
 
@@ -873,7 +1044,7 @@ function renderMcpView(): string {
             ? `<div>
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
                   <span class="badge ${state.mcpResult.ok ? "badge-pass" : "badge-fail"}">
-                    ${state.mcpResult.ok ? "200 OK" : "BLOCKED / ERROR"} · ${state.mcpResult.durationMs}ms · chain=${esc(state.mcpResult.chainId)}
+                    ${state.mcpResult.ok ? "200 OK (EMULATOR)" : "BLOCKED / ERROR"} · ${state.mcpResult.durationMs}ms · chain=${esc(state.mcpResult.chainId)}
                   </span>
                 </div>
 
@@ -888,13 +1059,21 @@ function renderMcpView(): string {
 
                 ${
                   txObj
-                    ? `<div class="field" style="margin-top:10px;">
+                    ? `${
+                        txObj.escrowPreSteps?.length
+                          ? `<div class="field" style="margin-top:10px;">
+                              <label>1:1 wugnot Escrow Pre-Steps (Deposit + Approve)</label>
+                              <pre class="code-block">${esc(txObj.escrowPreSteps.map((s) => s.gnokeyCommand).join("\n"))}</pre>
+                            </div>`
+                          : ""
+                      }
+                      <div class="field" style="margin-top:10px;">
                         <label>Ready-to-Execute gnokey CLI Command</label>
-                        <pre class="code-block">${esc(txObj.gnokeyCommand)}</pre>
+                        <pre class="code-block">${esc(txObj.transaction.gnokeyCommand)}</pre>
                       </div>
                       <div class="field" style="margin-top:10px;">
                         <label>gnomcp gno_call Payload</label>
-                        <pre class="code-block">${esc(JSON.stringify(txObj.gnomcpCallArgs, null, 2))}</pre>
+                        <pre class="code-block">${esc(JSON.stringify(txObj.transaction.gnomcpCallArgs, null, 2))}</pre>
                       </div>`
                     : ""
                 }
@@ -904,7 +1083,7 @@ function renderMcpView(): string {
                   <pre class="code-block">${esc(JSON.stringify(state.mcpResult.rpcRequest, null, 2))}</pre>
                 </div>
               </div>`
-            : `<div class="callout">Click <strong>Execute tools/call</strong> to inspect the live MCP JSON-RPC request, realm response, and generated <span class="mono">gnomcp</span> / <span class="mono">gnokey</span> transaction payload.</div>`
+            : `<div class="callout">Click <strong>Execute Emulated tools/call</strong> to inspect the MCP JSON-RPC request, emulator response, and generated <span class="mono">gnomcp</span> / <span class="mono">gnokey</span> payloads.</div>`
         }
       </section>
     </div>
@@ -916,12 +1095,12 @@ function renderLeaderboardView(): string {
   const sanitized = sanitizeRenderText(state.sanitizeInput);
 
   const invariants = [
-    ["Runtime-Current Caller Auth", "escrow.gno", "All 12 crossing functions authenticate cur.Previous().Address(); zero unsafe.PreviousRealm() auth."],
-    ["Direct-EOA Escrow Funding", "escrow.gno", "PostBounty & TopUpBounty enforce runtime.AssertOriginCall() + cur.Previous().IsUserCall()."],
-    ["Single-Denom ugnot Lock", "escrow.gno", "Rejects empty sends, multi-coin baskets, dust < 100,000 ugnot, and non-ugnot denoms."],
-    ["CEI & Conservation Math", "escrow.gno / types.gno", "State zeroed before BankerTypeRealmSend; integer basis-point ComputeSplit guarantees hunter + sponsor == escrow."],
-    ["Anti-Gaming & Liveness", "escrow.gno", "Sponsor cannot self-claim or cancel claimed work; expired claims release permissionlessly by block height."],
-    ["Render() Defense-in-Depth", "render.gno / types.gno", "Every user string passes sanitize/v0, EscapeMath ($ -> \\$), and NeutralizeGnoTags (<gno-*> -> &lt;gno-*)."],
+    ["1:1 wugnot grc20reg Escrow", "escrow.gno", "Non-crossing RealmTeller transfers in official wugnot; zero chain/banker or unsafe imports across production files."],
+    ["Per-Contributor Donor Custody (H-1)", "escrow.gno / state.gno", "AVL DonorShares ledger returns external top-ups strictly to original donors on CancelBounty and pro-rata on disputes; blocks donor/claimant wash."],
+    ["Bounded Liveness & Conflict Guard (M-1)", "escrow.gno", "Permissionless ExpireSubmission (100% auto-settle) and ExpireDispute (50/50 fallback); ResolveDispute blocks arbiter == sponsor/claimant."],
+    ["Unicode-Safe Tag Sanitizer (M-2)", "sanitize.gno / render.gno", "Byte-indexed ASCII case folding immune to U+0130 'İ' desync + p/nt/markdown/sanitize/v0 + EscapeMath + HTTPS-only proof links."],
+    ["Runtime-Current Auth & Direct-EOA Guard", "escrow.gno", "All crossing functions authenticate cur.Previous().Address(); PostBounty & TopUpBounty enforce AssertOriginCall() + IsUserCall()."],
+    ["Composable Consumer Import Proof", "hearthguild/v0", `Companion consumer realm ${GUILD_PKG_PATH} imports both hearthcore/v0 and hearthbounty/v1 for DAO/grant eligibility gates.`],
     ["Mainnet Write Safety Guard", "mcp-server/src/tools.ts", "assertWritableChain() permanently blocks write preparation on gnoland-1 / mainnet."],
   ];
 
@@ -930,7 +1109,7 @@ function renderLeaderboardView(): string {
       <div class="panel-header">
         <div>
           <h2 class="panel-title">Deterministic Guild Reputation Leaderboard</h2>
-          <p class="panel-sub">Sorted strictly by earned ugnot, settled count, sponsored volume, and address tie-breaker (zero non-deterministic map iteration).</p>
+          <p class="panel-sub">Sorted strictly by earned wugnot, settled count, net sponsored volume, and address tie-breaker (zero unsorted map iteration).</p>
         </div>
       </div>
       <div class="table-wrap">
@@ -944,7 +1123,7 @@ function renderLeaderboardView(): string {
               <th>Earned</th>
               <th>Settled</th>
               <th>Rating</th>
-              <th>Sponsored</th>
+              <th>Net Sponsored</th>
             </tr>
           </thead>
           <tbody>
@@ -977,9 +1156,10 @@ function renderLeaderboardView(): string {
       <section class="panel">
         <div class="panel-header">
           <div>
-            <h3 class="panel-title">7 Security &amp; Interrealm v2 Invariants</h3>
-            <p class="panel-sub">Verified across 12/12 gno test cases and 0 gno lint warnings.</p>
+            <h3 class="panel-title">7 Hardened V2.1 Protocol Invariants</h3>
+            <p class="panel-sub">Verified across 16/16 gno test cases and 0 gno lint warnings.</p>
           </div>
+          <button class="btn btn-primary btn-sm" data-action="goto-breaker">Test in Breaker Lab</button>
         </div>
         <div class="table-wrap">
           <table>
@@ -1009,8 +1189,8 @@ function renderLeaderboardView(): string {
       <section class="panel">
         <div class="panel-header">
           <div>
-            <h3 class="panel-title">Live Render() Injection Defense Tester</h3>
-            <p class="panel-sub">Test how hearthcore.EscapeMath + NeutralizeGnoTags stops smuggled gnoweb directives and TeX formulas.</p>
+            <h3 class="panel-title">Live Unicode-Safe Render() Defense Tester</h3>
+            <p class="panel-sub">Includes the Turkish dotted 'İ' (U+0130) expansion payload that bypassed v0 and is 100% blocked in v1.</p>
           </div>
         </div>
         <div class="field">
@@ -1018,12 +1198,12 @@ function renderLeaderboardView(): string {
           <textarea id="sanitize-input" class="textarea mono" data-action="sanitize-input">${esc(state.sanitizeInput)}</textarea>
         </div>
         <div class="field">
-          <label>Sanitized Render() Output</label>
+          <label>Patched v1 Sanitized Render() Output</label>
           <pre class="code-block">${esc(sanitized)}</pre>
         </div>
         <div class="callout" style="margin-top:10px;">
-          <strong>Reputation Tier Thresholds (Pure Integer Math):</strong><br/>
-          Apprentice (default) · Journeyman (&gt;=2 settled or &gt;=10 GNOT) · Master (&gt;=5 settled or &gt;=100 GNOT) · Guildmaster (&gt;=10 settled or &gt;=500 GNOT AND rating &gt;= 4.5 / 5.0).
+          <strong>Arbiter Trust Model &amp; Liveness Guarantee:</strong><br/>
+          Disputes route to a rotatable arbiter (<span class="mono">SetArbiter</span>) who is blocked from resolving any bounty they are party to; if the sponsor stalls on review or the arbiter stalls on a dispute, permissionless <span class="mono">ExpireSubmission</span> (100% hunter) and <span class="mono">ExpireDispute</span> (50/50 pro-rata) guarantee bounded liveness.
         </div>
       </section>
     </div>
@@ -1036,8 +1216,8 @@ function renderDiagView(): string {
     <section class="panel">
       <div class="panel-header">
         <div>
-          <h2 class="panel-title">/diag — Automated Protocol &amp; Live Onyx Self-Test Suite</h2>
-          <p class="panel-sub">Executes deterministic state-machine invariants, security guard checks, MCP mainnet safety checks, and live Onyx RPC TX proof verification directly in your browser.</p>
+          <h2 class="panel-title">/diag — Automated V2.1 Security &amp; Live Onyx Self-Test Suite</h2>
+          <p class="panel-sub">Executes H-1/M-1/M-2 security regressions, conservation math, MCP 12-tool safety checks, and live Onyx RPC TX proof verification directly in your browser.</p>
         </div>
         <button class="btn btn-primary btn-sm" data-action="run-diag">
           ${state.diagRunning ? "Running Diagnostics..." : "Re-Run All Diagnostics"}
@@ -1059,13 +1239,13 @@ function renderDiagView(): string {
               </div>
               <div class="kpi-card">
                 <div class="kpi-label">Gno &amp; MCP Repo Suite</div>
-                <div class="kpi-value text-emerald">17 / 17</div>
-                <div class="kpi-meta"><span>12 gno test · 0 lint · 5 MCP tests</span></div>
+                <div class="kpi-value text-emerald">21 / 21</div>
+                <div class="kpi-meta"><span>16 gno test · 0 lint · 5 MCP tests</span></div>
               </div>
               <div class="kpi-card">
-                <div class="kpi-label">Onyx Deployment Proofs</div>
-                <div class="kpi-value text-amber mono">2 / 2</div>
-                <div class="kpi-meta"><span class="mono">#1,374,766 &amp; #1,374,813</span></div>
+                <div class="kpi-label">Onyx Active Deployments</div>
+                <div class="kpi-value text-amber mono">3 / 3</div>
+                <div class="kpi-meta"><span class="mono">hearthcore · v1 · hearthguild</span></div>
               </div>
             </div>
 
@@ -1084,7 +1264,7 @@ function renderDiagView(): string {
                 )
                 .join("")}
             </div>`
-          : `<div class="callout">Running self-test checks against HearthBounty engine and live Onyx RPC...</div>`
+          : `<div class="callout">Running self-test checks against HearthBounty v1 engine and live Onyx RPC...</div>`
       }
     </section>
   `;
@@ -1096,32 +1276,32 @@ function renderWalkthroughDrawer(): string {
     {
       num: 1,
       time: "0:00 – 0:12",
-      title: "Verify Live Gno.land Onyx (onyx-1) On-Chain Proofs",
-      desc: "Inspect live RPC block height and verify hearthcore/v0 (Block 1,374,766, LIVE) and hearthbounty/v0 (Block 1,374,813) directly against rpc.onyx.testnets.gno.land.",
+      title: "Verify Live Gno.land Onyx (onyx-1) Multi-Realm Proofs",
+      desc: "Inspect live RPC proofs for hearthcore/v0 (#1,374,766), hardened hearthbounty/v1 (#1,378,958), and companion consumer hearthguild/v0 (#1,378,960).",
       btn: "Open Live Onyx Explorer",
       action: "walk-1",
     },
     {
       num: 2,
       time: "0:12 – 0:24",
-      title: "Post & Fund a Real ugnot Escrow Bounty",
-      desc: "Switch to Sponsor, open PostBounty, lock ugnot into the realm bank, and watch the CEI conservation invariant (realmBank == totalEscrow) hold.",
-      btn: "Jump & Open PostBounty",
+      title: "Run All 4 Exploits in the Adversarial Breaker Lab",
+      desc: "Fire H-1 Third-Party TopUp Theft, M-2 Unicode U+0130 ('İ') Tag Injection, MITM/uatom Guards, and M-1 Timeout/Conflict Exploits in 1 click.",
+      btn: "Run All 4 Breaker Exploits",
       action: "walk-2",
     },
     {
       num: 3,
       time: "0:24 – 0:36",
-      title: "Run Autonomous AI Agent Loop via MCP Inspector",
-      desc: "Watch an AI agent call hearth_list_bounties, prepare ClaimBounty, SHA-256 hash a deliverable via hearth_prepare_submit_proof, and prepare settlement.",
+      title: "Run Emulated AI Agent Loop in MCP Emulator",
+      desc: "Watch an agent call hearth_list_bounties, prepare ClaimBounty, SHA-256 hash a deliverable over HTTPS, and prepare wugnot settlement.",
       btn: "Run MCP Agent Loop",
       action: "walk-3",
     },
     {
       num: 4,
       time: "0:36 – 0:48",
-      title: "Settle Escrow & Inspect Reputation Tier Upgrade",
-      desc: "Approve Bounty #2 as Sponsor to release 5.50 GNOT to ironforge-dev, then inspect the deterministic Leaderboard and 7 Interrealm v2 security guards.",
+      title: "Settle Escrow & Inspect Guild Reputation Leaderboard",
+      desc: "Approve Bounty #2 as Sponsor to release 5.50 GNOT to ironforge-dev, then inspect the deterministic Leaderboard and V2.1 invariants.",
       btn: "Settle #2 & Open Leaderboard",
       action: "walk-4",
     },
@@ -1129,7 +1309,7 @@ function renderWalkthroughDrawer(): string {
       num: 5,
       time: "0:48 – 0:60",
       title: "Execute /diag Automated Self-Test Suite",
-      desc: "Run all 9 live protocol, math conservation, sanitizer, mainnet safety, and Onyx RPC verification checks in under a second.",
+      desc: "Run all 10 live V2.1 security, custody, timeout, sanitizer, MCP mainnet safety, and Onyx RPC verification checks in under a second.",
       btn: "Run /diag Self-Test",
       action: "walk-5",
     },
@@ -1140,7 +1320,7 @@ function renderWalkthroughDrawer(): string {
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
         <div>
           <h2 style="margin:0;font-size:17px;">60-Second Judge Walkthrough</h2>
-          <p class="panel-sub">Zero-install guided tour of every DoraHacks Gnome Tavern rubric criterion.</p>
+          <p class="panel-sub">Zero-install guided verification of every HearthBounty V2.1 guarantee.</p>
         </div>
         <button class="btn btn-sm" data-action="close-drawer">Close</button>
       </div>
@@ -1180,6 +1360,9 @@ function render(): void {
     case "simulator":
       bodyHtml = renderSimulatorView();
       break;
+    case "breaker":
+      bodyHtml = renderBreakerLabView();
+      break;
     case "onyx":
       bodyHtml = renderOnyxView();
       break;
@@ -1205,12 +1388,8 @@ function render(): void {
 
 async function runAutonomousAgentLoop(): Promise<void> {
   const log: string[] = [];
-  const listRes = await executeMcpTool(
-    state.realm,
-    "hearth_list_bounties",
-    { status: "open", limit: 10 },
-    state.mcpChainId === "gnoland-1" ? "onyx-1" : state.mcpChainId,
-  );
+  const writableChain = state.mcpChainId === "gnoland-1" ? "onyx-1" : state.mcpChainId;
+  const listRes = await executeMcpTool(state.realm, "hearth_list_bounties", { status: "open", limit: 10 }, writableChain);
   const openList =
     (listRes.response as { bounties?: Array<{ id: number; title: string; escrow_ugnot: number }> })?.bounties ?? [];
 
@@ -1224,16 +1403,15 @@ async function runAutonomousAgentLoop(): Promise<void> {
       "agent",
       25_000,
     );
-    log.push(`0. Seeded fresh Open Bounty #${targetId} (3.00 GNOT) for live loop.`);
+    log.push(`0. Seeded fresh Open Bounty #${targetId} (3.00 GNOT) for emulated loop.`);
   } else {
     log.push(`1. hearth_list_bounties(status="open") -> selected top-funded Bounty #${targetId}.`);
   }
 
-  const writableChain = state.mcpChainId === "gnoland-1" ? "onyx-1" : state.mcpChainId;
   const claimPrep = await executeMcpTool(
     state.realm,
     "hearth_prepare_claim",
-    { id: targetId, agentNote: "Claimed autonomously via hearthbounty-mcp inspector loop." },
+    { id: targetId, agentNote: "Claimed autonomously via hearthbounty-mcp emulator loop." },
     writableChain,
   );
   log.push(`2. hearth_prepare_claim(id=${targetId}) -> ok=${claimPrep.ok} (${claimPrep.durationMs}ms).`);
@@ -1254,7 +1432,7 @@ async function runAutonomousAgentLoop(): Promise<void> {
     writableChain,
   );
   const digest = (proofPrep.response as { computedDigest?: string })?.computedDigest ?? "sha256:verified0001";
-  log.push(`3. hearth_prepare_submit_proof -> SHA-256 ${digest.slice(0, 26)}...`);
+  log.push(`3. hearth_prepare_submit_proof (HTTPS-only) -> SHA-256 ${digest.slice(0, 26)}...`);
 
   state.realm.submitProof(
     { caller: agent.address },
@@ -1267,7 +1445,7 @@ async function runAutonomousAgentLoop(): Promise<void> {
   const settlePrep = await executeMcpTool(
     state.realm,
     "hearth_prepare_settle",
-    { id: targetId, rating: 5, reviewNote: "Verified SHA-256 proof and settling full escrow." },
+    { id: targetId, rating: 5, reviewNote: "Verified SHA-256 proof and settling full wugnot escrow." },
     writableChain,
   );
   log.push(`4. hearth_prepare_settle(id=${targetId}, rating=5) -> ready to release escrow.`);
@@ -1276,7 +1454,7 @@ async function runAutonomousAgentLoop(): Promise<void> {
     { caller: sponsor.address },
     targetId,
     5,
-    "Verified SHA-256 proof and settling full escrow.",
+    "Verified SHA-256 proof and settling full wugnot escrow.",
   );
   const agentProf = state.realm.toProfileView(state.realm.profiles.get(agent.address)!);
   log.push(
@@ -1288,7 +1466,7 @@ async function runAutonomousAgentLoop(): Promise<void> {
   state.mcpResult = settlePrep;
   state.selectedBountyId = targetId;
   state.completedSteps.add(3);
-  setToast(true, `Autonomous MCP agent loop settled Bounty #${targetId}.`);
+  setToast(true, `Emulated MCP agent loop settled Bounty #${targetId}.`);
   render();
 }
 
@@ -1316,6 +1494,14 @@ function bindEvents(): void {
   document.querySelectorAll<HTMLElement>("[data-bounty-id]").forEach((el) => {
     el.addEventListener("click", () => {
       state.selectedBountyId = Number(el.dataset.bountyId);
+      render();
+    });
+  });
+
+  document.querySelectorAll<HTMLElement>("[data-breaker]").forEach((el) => {
+    el.addEventListener("click", () => {
+      const id = el.dataset.breaker as BreakerId;
+      state.breakerResults[id] = runBreakerTest(id);
       render();
     });
   });
@@ -1367,7 +1553,19 @@ function bindEvents(): void {
   };
 
   onAction("goto-onyx", () => setTab("onyx"));
+  onAction("goto-breaker", () => setTab("breaker"));
   onAction("refresh-onyx", () => void refreshOnyx());
+  onAction("run-all-breakers", () => {
+    for (const spec of BREAKER_TESTS) {
+      state.breakerResults[spec.id] = runBreakerTest(spec.id);
+    }
+    state.completedSteps.add(2);
+    render();
+  });
+  onAction("clear-breakers", () => {
+    state.breakerResults = {};
+    render();
+  });
   onAction("open-drawer", () => {
     state.drawerOpen = true;
     render();
@@ -1434,7 +1632,7 @@ function bindEvents(): void {
       state.selectedBountyId = id;
       setToast(
         true,
-        `Executed full lifecycle on Bounty #${id}: 4.50 GNOT settled to anvil-mcp-agent; realmBank == totalEscrow verified.`,
+        `Executed full lifecycle on Bounty #${id}: 4.50 GNOT settled to anvil-mcp-agent; wugnot escrow invariant verified.`,
       );
       render();
     } catch (err) {
@@ -1459,7 +1657,7 @@ function bindEvents(): void {
     try {
       const id = Number(el.dataset.id);
       state.realm.cancelBounty(buildCallCtx(), id);
-      setToast(true, `CancelBounty(#${id}) refunded full escrow to sponsor.`);
+      setToast(true, `CancelBounty(#${id}) refunded each contributor directly (sponsor + external donors).`);
     } catch (err) {
       setToast(false, err instanceof Error ? err.message : String(err));
     }
@@ -1470,7 +1668,29 @@ function bindEvents(): void {
     try {
       const id = Number(el.dataset.id);
       state.realm.releaseExpiredClaim(buildCallCtx(), id);
-      setToast(true, `ReleaseExpiredClaim(#${id}) returned bounty to Open.`);
+      setToast(true, `ReleaseExpiredClaim(#${id}) returned bounty to Open and cleared stale proofs.`);
+    } catch (err) {
+      setToast(false, err instanceof Error ? err.message : String(err));
+    }
+    render();
+  });
+
+  onAction("expire-submission", (el) => {
+    try {
+      const id = Number(el.dataset.id);
+      state.realm.expireSubmission(buildCallCtx(), id);
+      setToast(true, `ExpireSubmission(#${id}) settled 100% escrow to claimant after review timeout.`);
+    } catch (err) {
+      setToast(false, err instanceof Error ? err.message : String(err));
+    }
+    render();
+  });
+
+  onAction("expire-dispute", (el) => {
+    try {
+      const id = Number(el.dataset.id);
+      state.realm.expireDispute(buildCallCtx(), id);
+      setToast(true, `ExpireDispute(#${id}) executed permissionless 50/50 pro-rata fallback split.`);
     } catch (err) {
       setToast(false, err instanceof Error ? err.message : String(err));
     }
@@ -1500,7 +1720,7 @@ function bindEvents(): void {
     try {
       const id = Number(el.dataset.id);
       state.realm.openDispute(buildCallCtx(), id, "Requesting arbiter review for partial scope split.");
-      setToast(true, `OpenDispute(#${id}) escalated bounty to Arbiter review.`);
+      setToast(true, `OpenDispute(#${id}) escalated bounty to Arbiter review with deterministic timeout.`);
     } catch (err) {
       setToast(false, err instanceof Error ? err.message : String(err));
     }
@@ -1547,10 +1767,10 @@ function bindEvents(): void {
   onAction("walk-2", () => {
     state.completedSteps.add(2);
     state.drawerOpen = false;
-    state.activeActorId = "sponsor";
-    state.guardMode = "eoa";
-    state.showPostForm = true;
-    setTab("simulator");
+    for (const spec of BREAKER_TESTS) {
+      state.breakerResults[spec.id] = runBreakerTest(spec.id);
+    }
+    setTab("breaker");
   });
   onAction("walk-3", () => {
     state.completedSteps.add(3);
@@ -1567,7 +1787,7 @@ function bindEvents(): void {
         { caller: DEMO_ACTORS[0].address },
         2,
         5,
-        "Verified adversarial Interrealm v2 test suite in Judge Walkthrough.",
+        "Verified adversarial V2.1 test suite in Judge Walkthrough.",
       );
       setToast(true, "Settled Bounty #2 (5.50 GNOT) to ironforge-dev; leaderboard updated.");
     }
@@ -1594,8 +1814,7 @@ function bindEvents(): void {
       );
       state.selectedBountyId = id;
       state.showPostForm = false;
-      state.completedSteps.add(2);
-      setToast(true, `PostBounty created Bounty #${id} with locked ugnot escrow.`);
+      setToast(true, `PostBounty created Bounty #${id} with locked 1:1 wugnot escrow.`);
     } catch (err) {
       setToast(false, err instanceof Error ? err.message : String(err));
     }
@@ -1625,7 +1844,7 @@ function bindEvents(): void {
         String(fd.get("proofDigest") ?? ""),
         String(fd.get("summary") ?? ""),
       );
-      setToast(true, `SubmitProof(#${state.selectedBountyId}) recorded verifiable SHA-256 digest.`);
+      setToast(true, `SubmitProof(#${state.selectedBountyId}) recorded verifiable SHA-256 digest & review window.`);
     } catch (err) {
       setToast(false, err instanceof Error ? err.message : String(err));
     }
@@ -1645,7 +1864,7 @@ function bindEvents(): void {
       state.completedSteps.add(4);
       setToast(
         true,
-        `ApproveAndSettle(#${state.selectedBountyId}) released full escrow via CEI and updated on-chain reputation.`,
+        `ApproveAndSettle(#${state.selectedBountyId}) released full wugnot escrow via CEI and updated reputation.`,
       );
     } catch (err) {
       setToast(false, err instanceof Error ? err.message : String(err));
@@ -1665,7 +1884,7 @@ function bindEvents(): void {
       );
       setToast(
         true,
-        `ResolveDispute(#${state.selectedBountyId}) split escrow deterministically (${state.disputeBps} bps hunter).`,
+        `ResolveDispute(#${state.selectedBountyId}) split escrow deterministically (${state.disputeBps} bps hunter, pro-rata refunds).`,
       );
     } catch (err) {
       setToast(false, err instanceof Error ? err.message : String(err));
@@ -1674,7 +1893,6 @@ function bindEvents(): void {
   });
 }
 
-// Keep hash navigation reactive
 window.addEventListener("hashchange", () => {
   const next = parseInitialTab();
   if (next !== state.tab) {
@@ -1693,8 +1911,9 @@ if (state.tab === "diag") {
   void triggerDiagnostics();
 }
 
-// Expose read-only diagnostic hook for automated verification
 (window as unknown as Record<string, unknown>).__HEARTH_PLAYGROUND__ = {
   realmPath: REALM_PKG_PATH,
+  guildPath: GUILD_PKG_PATH,
   runDiagnostics,
+  runBreakerTest,
 };

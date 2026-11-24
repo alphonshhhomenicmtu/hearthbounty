@@ -14,7 +14,11 @@ export const VALID_STATUSES = [
 ] as const;
 export type BountyStatus = (typeof VALID_STATUSES)[number];
 
+export const ESCROW_TOKEN_KEY = "gno.land/r/gnoland/wugnot.wugnot";
+export const WUGNOT_PKG_PATH = "gno.land/r/gnoland/wugnot";
+export const DEFAULT_V1_REALM_ADDRESS = "g1dkvpnfcp8saevy2g46x9z2ljyj9saez6akm39a";
 export const MIN_REWARD_UGNOT = 100_000;
+export const MAX_ESCROW_UGNOT = 1_000_000_000_000;
 export const DEFAULT_GAS_WANTED = 10_000_000;
 export const DEFAULT_GAS_FEE = "10000ugnot";
 
@@ -23,10 +27,14 @@ export interface HearthConfig {
   chainId: string;
   realmPath: string;
   gnowebBaseUrl: string;
+  escrowRealmAddress?: string;
 }
 
 export interface BoardStats {
   realm_path: string;
+  web_path?: string;
+  escrow_token?: string;
+  escrow_address?: string;
   arbiter: string;
   chain_height: number;
   total_bounties: number;
@@ -55,6 +63,9 @@ export interface BountyItem {
   claim_note: string;
   escrow_ugnot: number;
   initial_ugnot: number;
+  sponsor_funded_ugnot?: number;
+  external_top_up_ugnot?: number;
+  external_donor_count?: number;
   payout_ugnot: number;
   refund_ugnot: number;
   reward_formatted: string;
@@ -64,6 +75,9 @@ export interface BountyItem {
   claimed_height: number;
   deadline_height: number;
   submitted_height: number;
+  review_deadline_height?: number;
+  disputed_height?: number;
+  dispute_deadline_height?: number;
   settled_height: number;
   proof_url: string;
   proof_digest: string;
@@ -161,11 +175,13 @@ export function buildPreparedTx(
   send?: string,
   subRoute = "",
   keyPlaceholder = "<your-key>",
+  pkgPathOverride?: string,
 ): PreparedTransaction {
   assertWritableChain(cfg.chainId);
+  const targetPkg = pkgPathOverride ?? cfg.realmPath;
   const parts = [
     "gnokey maketx call",
-    `-pkgpath ${shellQuote(cfg.realmPath)}`,
+    `-pkgpath ${shellQuote(targetPkg)}`,
     `-func ${shellQuote(func)}`,
     ...args.map((a) => `-args ${shellQuote(a)}`),
   ];
@@ -182,7 +198,7 @@ export function buildPreparedTx(
   );
 
   const profile = cfg.chainId === "dev" ? "local" : "testnet";
-  const pathPart = cfg.realmPath.replace(/^[^/]+/, "");
+  const pathPart = targetPkg.replace(/^[^/]+/, "");
   const gnowebUrl = subRoute
     ? `${cfg.gnowebBaseUrl.replace(/\/+$/, "")}${pathPart}:${subRoute}`
     : `${cfg.gnowebBaseUrl.replace(/\/+$/, "")}${pathPart}`;
@@ -190,7 +206,7 @@ export function buildPreparedTx(
   return {
     chainId: cfg.chainId,
     rpcUrl: cfg.rpcUrl,
-    pkgPath: cfg.realmPath,
+    pkgPath: targetPkg,
     func,
     args,
     ...(send ? { send } : {}),
@@ -199,7 +215,7 @@ export function buildPreparedTx(
     gnokeyCommand: parts.join(" "),
     gnomcpCallArgs: {
       profile,
-      pkg_path: cfg.realmPath,
+      pkg_path: targetPkg,
       func,
       args,
       ...(send ? { send } : {}),
@@ -303,23 +319,48 @@ export class HearthToolbox {
     if (!VALID_CATEGORIES.includes(params.category)) {
       throw new Error(`Invalid category "${params.category}". Expected one of: ${VALID_CATEGORIES.join(", ")}`);
     }
-    if (!Number.isInteger(params.rewardUgnot) || params.rewardUgnot < MIN_REWARD_UGNOT) {
-      throw new Error(`rewardUgnot must be an integer >= ${MIN_REWARD_UGNOT} (0.10 GNOT).`);
+    if (!Number.isInteger(params.rewardUgnot) || params.rewardUgnot < MIN_REWARD_UGNOT || params.rewardUgnot > MAX_ESCROW_UGNOT) {
+      throw new Error(`rewardUgnot must be an integer between ${MIN_REWARD_UGNOT} (0.10 GNOT) and ${MAX_ESCROW_UGNOT}.`);
     }
     const deadlineBlocks = params.deadlineBlocks ?? 50_000;
     if (!Number.isInteger(deadlineBlocks) || deadlineBlocks < 10 || deadlineBlocks > 2_000_000) {
       throw new Error("deadlineBlocks must be between 10 and 2,000,000.");
     }
 
+    const keyName = params.keyName ?? "<your-key>";
+    const spender = this.config.escrowRealmAddress ?? DEFAULT_V1_REALM_ADDRESS;
+
     return {
       rewardFormatted: formatUgnotAsGnot(params.rewardUgnot),
+      escrowToken: ESCROW_TOKEN_KEY,
+      escrowSpender: spender,
+      escrowPreSteps: [
+        buildPreparedTx(
+          this.config,
+          "Deposit",
+          [],
+          `${params.rewardUgnot}ugnot`,
+          "",
+          keyName,
+          WUGNOT_PKG_PATH,
+        ),
+        buildPreparedTx(
+          this.config,
+          "Approve",
+          [spender, String(params.rewardUgnot)],
+          undefined,
+          "",
+          keyName,
+          WUGNOT_PKG_PATH,
+        ),
+      ],
       transaction: buildPreparedTx(
         this.config,
         "PostBounty",
-        [title, spec, params.category, String(deadlineBlocks)],
-        `${params.rewardUgnot}ugnot`,
+        [title, spec, params.category, String(params.rewardUgnot), String(deadlineBlocks)],
+        undefined,
         "post",
-        params.keyName ?? "<your-key>",
+        keyName,
       ),
     };
   }
@@ -361,8 +402,8 @@ export class HearthToolbox {
     keyName?: string;
   }) {
     const url = params.proofURL.trim();
-    if (!url.startsWith("https://") && !url.startsWith("http://") && !url.startsWith("ipfs://")) {
-      throw new Error("proofURL must start with https://, http://, or ipfs://");
+    if (!url.startsWith("https://") || /\s/.test(url) || url.length < 12 || url.length > 300) {
+      throw new Error("proofURL must be a valid https:// URL (12-300 chars, no whitespace).");
     }
     const digest = params.proofDigest?.trim()
       ? params.proofDigest.trim()
@@ -429,6 +470,55 @@ export class HearthToolbox {
         this.config,
         "ApproveAndSettle",
         [String(params.id), String(params.rating), params.reviewNote.trim()],
+        undefined,
+        `bounty/${params.id}`,
+        params.keyName ?? "<your-key>",
+      ),
+    };
+  }
+
+  async prepareExpireSubmission(params: { id: number; keyName?: string }) {
+    const bounty = await this.getBounty(params.id);
+    if (!bounty.found) {
+      throw new Error(`Bounty #${params.id} was not found on-chain.`);
+    }
+    if (bounty.status !== "submitted") {
+      throw new Error(`Bounty #${params.id} is "${bounty.status}", expected "submitted" for ExpireSubmission.`);
+    }
+    return {
+      bountyId: bounty.id,
+      claimant: bounty.claimant,
+      reviewDeadlineHeight: bounty.review_deadline_height ?? 0,
+      payoutUgnot: bounty.escrow_ugnot,
+      payoutFormatted: formatUgnotAsGnot(bounty.escrow_ugnot),
+      transaction: buildPreparedTx(
+        this.config,
+        "ExpireSubmission",
+        [String(params.id)],
+        undefined,
+        `bounty/${params.id}`,
+        params.keyName ?? "<your-key>",
+      ),
+    };
+  }
+
+  async prepareExpireDispute(params: { id: number; keyName?: string }) {
+    const bounty = await this.getBounty(params.id);
+    if (!bounty.found) {
+      throw new Error(`Bounty #${params.id} was not found on-chain.`);
+    }
+    if (bounty.status !== "disputed") {
+      throw new Error(`Bounty #${params.id} is "${bounty.status}", expected "disputed" for ExpireDispute.`);
+    }
+    return {
+      bountyId: bounty.id,
+      disputeDeadlineHeight: bounty.dispute_deadline_height ?? 0,
+      escrowUgnot: bounty.escrow_ugnot,
+      fallbackSplitBps: 5000,
+      transaction: buildPreparedTx(
+        this.config,
+        "ExpireDispute",
+        [String(params.id)],
         undefined,
         `bounty/${params.id}`,
         params.keyName ?? "<your-key>",

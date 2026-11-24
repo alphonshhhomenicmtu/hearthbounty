@@ -11,11 +11,16 @@ if [[ ! -x "$GNO_BIN" ]]; then
   exit 1
 fi
 
+# Isolate local .tools workspace so gno does not walk internal benchops stubs.
+if [[ -d "$ROOT_DIR/.tools" && ! -f "$ROOT_DIR/.tools/gnowork.toml" ]]; then
+  touch "$ROOT_DIR/.tools/gnowork.toml"
+fi
+
 echo "==> Running Gno package & realm tests"
-(cd "$ROOT_DIR" && "$GNO_BIN" test -v ./p/... ./r/...)
+(cd "$ROOT_DIR" && "$GNO_BIN" test -v -root-dir "$GNOROOT" ./p/... ./r/...)
 
 echo "==> Running Gno linter"
-(cd "$ROOT_DIR" && "$GNO_BIN" lint ./p/... ./r/...)
+(cd "$ROOT_DIR" && "$GNO_BIN" lint -root-dir "$GNOROOT" ./p/... ./r/...)
 
 echo "==> Running TypeScript MCP server build & unit tests"
 (cd "$ROOT_DIR/mcp-server" && npm test)

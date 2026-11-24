@@ -10,8 +10,7 @@ fi
 NEW_NS="$1"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# Detect current namespace from r/.../hearthbounty/v0/gnomod.toml
-CURRENT_MOD="$(grep -E '^module\s*=' "$ROOT_DIR"/r/*/hearthbounty/v0/gnomod.toml | head -n 1 | sed -E 's/.*"gno\.land\/r\/([^/]+)\/hearthbounty\/v0".*/\1/')"
+CURRENT_MOD="$(grep -E '^module\s*=' "$ROOT_DIR"/r/*/hearthbounty/v1/gnomod.toml | head -n 1 | sed -E 's/.*"gno\.land\/r\/([^/]+)\/hearthbounty\/v1".*/\1/')"
 if [[ -z "$CURRENT_MOD" ]]; then
   echo "Error: could not detect current namespace." >&2
   exit 1
@@ -27,9 +26,10 @@ mv "$ROOT_DIR/p/$CURRENT_MOD" "$ROOT_DIR/p/$NEW_NS"
 mv "$ROOT_DIR/r/$CURRENT_MOD" "$ROOT_DIR/r/$NEW_NS"
 
 while IFS= read -r file; do
-  perl -0pi -e "s|gno\\.land/p/\Q$CURRENT_MOD\E/hearthcore/v0|gno.land/p/$NEW_NS/hearthcore/v0|g; s|gno\\.land/r/\Q$CURRENT_MOD\E/hearthbounty/v0|gno.land/r/$NEW_NS/hearthbounty/v0|g; s|/r/\Q$CURRENT_MOD\E/hearthbounty/v0|/r/$NEW_NS/hearthbounty/v0|g" "$file"
+  perl -0pi -e "s|gno\\.land/p/\Q$CURRENT_MOD\E/hearthcore/v0|gno.land/p/$NEW_NS/hearthcore/v0|g; s|gno\\.land/r/\Q$CURRENT_MOD\E/hearthbounty/v1|gno.land/r/$NEW_NS/hearthbounty/v1|g; s|/r/\Q$CURRENT_MOD\E/hearthbounty/v1|/r/$NEW_NS/hearthbounty/v1|g; s|gno\\.land/r/\Q$CURRENT_MOD\E/hearthguild/v0|gno.land/r/$NEW_NS/hearthguild/v0|g; s|/r/\Q$CURRENT_MOD\E/hearthguild/v0|/r/$NEW_NS/hearthguild/v0|g" "$file"
 done < <(find "$ROOT_DIR/p/$NEW_NS" "$ROOT_DIR/r/$NEW_NS" -type f \( -name '*.gno' -o -name 'gnomod.toml' \))
 
 echo "Done! Updated module paths:"
 echo "  gno.land/p/$NEW_NS/hearthcore/v0"
-echo "  gno.land/r/$NEW_NS/hearthbounty/v0"
+echo "  gno.land/r/$NEW_NS/hearthbounty/v1"
+echo "  gno.land/r/$NEW_NS/hearthguild/v0"
