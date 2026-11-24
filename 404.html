@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>HearthBounty — Redirecting</title>
+    <script>
+      (function () {
+        var path = window.location.pathname || "";
+        var base = path.indexOf("/hearthbounty") === 0 ? "/hearthbounty/" : "/";
+        var sub = path.replace(/^\/hearthbounty\/?/, "").replace(/^\/+/, "");
+        var target = base + (sub ? "#/" + sub : "");
+        window.location.replace(target);
+      })();
+    </script>
+  </head>
+  <body>
+    <p>Redirecting to HearthBounty Playground...</p>
+  </body>
+</html>
