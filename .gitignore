@@ -1,0 +1,16 @@
+# Local Gno toolchain binaries and shallow-cloned GNOROOT
+.tools/
+.gnodev/
+gno-dev-data/
+
+# Node / TypeScript
+node_modules/
+mcp-server/node_modules/
+mcp-server/dist/
+*.tsbuildinfo
+
+# OS / Editor
+.DS_Store
+*.log
+.env
+.env.local

@@ -1,0 +1,26 @@
+{
+  "name": "hearthbounty-mcp",
+  "version": "0.1.0",
+  "description": "Model Context Protocol (MCP) server and CLI bridge for HearthBounty on Gno.land (compatible with gnomcp)",
+  "type": "module",
+  "main": "dist/src/index.js",
+  "bin": {
+    "hearthbounty-mcp": "dist/src/server.js",
+    "hearth-cli": "dist/src/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test dist/test/mcp.test.js",
+    "start": "node dist/src/server.js",
+    "cli": "node dist/src/cli.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.3"
+  }
+}
