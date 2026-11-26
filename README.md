@@ -43,7 +43,7 @@ Deployed on **Onyx (`onyx-1`)** (`https://rpc.onyx.testnets.gno.land:443`) under
 |---|---|---:|---:|---|---|
 | **Pure Package (`/p/`)** | `gno.land/p/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthcore/v0` | `1,374,766` | `33,928,050` | **LIVE (`HTTP 200`)** | [`0x54B2CE7F...A1CB1A`](https://rpc.onyx.testnets.gno.land:443/tx?hash=0x54B2CE7FAC30D71AF80F0F94818705D8C96CD58D9004FD9A0EC5DF832DA1CB1A) |
 | **Hardened Escrow Realm (`/r/`)** | `gno.land/r/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthbounty/v1` | `1,378,958` | `126,117,131` | **LIVE (`HTTP 200`)** | [`0xEA7C4437...B52CFC`](https://rpc.onyx.testnets.gno.land:443/tx?hash=0xEA7C4437B635CC0DFA8295B9B1FD77D9113B012CA86E7E0A4E5259723CB52CFC) |
-| **Companion Consumer Realm (`/r/`)** | `gno.land/r/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthguild/v0` | `1,378,960` | `17,437,231` | Confirmed (GPAO reoffer queued) | [`0xBFF689BC...D4C75F`](https://rpc.onyx.testnets.gno.land:443/tx?hash=0xBFF689BC49A59AF56CC85A2C9FB0C7B0ED44F224286AA86916B375216BD4C75F) |
+| **Companion Consumer Realm (`/r/`)** | `gno.land/r/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthguild/v0` | `1,378,960` | `17,437,231` | **LIVE (`HTTP 200`)** | [`0xBFF689BC...D4C75F`](https://rpc.onyx.testnets.gno.land:443/tx?hash=0xBFF689BC49A59AF56CC85A2C9FB0C7B0ED44F224286AA86916B375216BD4C75F) |
 | *Legacy Prototype (Superseded)* | `gno.land/r/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthbounty/v0` | `1,374,813` | `94,047,145` | Inert (`chain/banker`) | [`0xBB26A27B...8D0BC5`](https://rpc.onyx.testnets.gno.land:443/tx?hash=0xBB26A27BC48122AC8B62BB70CD815D623B516CF933B7156157D162551E8D0BC5) |
 
 - **Derived `hearthbounty/v1` Escrow Spender Address (`wugnot.Approve` target):** `g1dkvpnfcp8saevy2g46x9z2ljyj9saez6akm39a`
