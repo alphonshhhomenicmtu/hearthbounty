@@ -18,7 +18,7 @@ HearthBounty is a Gno.land v1.8.0 micro-bounty protocol composed of three on-cha
   - **Hardened Escrow Realm (`hearthbounty/v1`):** `https://onyx.testnets.gno.land/r/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthbounty/v1`
   - **Companion Consumer Realm (`hearthguild/v0`):** `https://onyx.testnets.gno.land/r/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthguild/v0`
   - **Reusable Pure Package (`hearthcore/v0`):** `https://onyx.testnets.gno.land/p/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthcore/v0`
-- **Verification:** `16/16 gno test` passing · `0 gno lint` warnings · `5/5 MCP wire-protocol` tests passing · `5/5 Web Playground & Breaker Lab` tests passing · automated browser `/diag` self-test suite
+- **Verification:** `37/37 gno test` passing (`14` `hearthcore/v0` · `18` `hearthbounty/v1` · `5` `hearthguild/v0`) · `0 gno lint` warnings · `12/12 MCP` tests passing · `16/16 Web Playground & Onyx` tests passing · `10/10` live browser `/diag` checks (`0` console/page/network errors)
 
 ---
 
@@ -44,7 +44,7 @@ Deployed on **Onyx (`onyx-1`)** (`https://rpc.onyx.testnets.gno.land:443`) under
 | **Pure Package (`/p/`)** | `gno.land/p/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthcore/v0` | `1,374,766` | `33,928,050` | **LIVE (`HTTP 200`)** | [`0x54B2CE7F...A1CB1A`](https://rpc.onyx.testnets.gno.land:443/tx?hash=0x54B2CE7FAC30D71AF80F0F94818705D8C96CD58D9004FD9A0EC5DF832DA1CB1A) |
 | **Hardened Escrow Realm (`/r/`)** | `gno.land/r/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthbounty/v1` | `1,378,958` | `126,117,131` | **LIVE (`HTTP 200`)** | [`0xEA7C4437...B52CFC`](https://rpc.onyx.testnets.gno.land:443/tx?hash=0xEA7C4437B635CC0DFA8295B9B1FD77D9113B012CA86E7E0A4E5259723CB52CFC) |
 | **Companion Consumer Realm (`/r/`)** | `gno.land/r/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthguild/v0` | `1,378,960` | `17,437,231` | **LIVE (`HTTP 200`)** | [`0xBFF689BC...D4C75F`](https://rpc.onyx.testnets.gno.land:443/tx?hash=0xBFF689BC49A59AF56CC85A2C9FB0C7B0ED44F224286AA86916B375216BD4C75F) |
-| *Legacy Prototype (Superseded)* | `gno.land/r/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthbounty/v0` | `1,374,813` | `94,047,145` | Inert (`chain/banker`) | [`0xBB26A27B...8D0BC5`](https://rpc.onyx.testnets.gno.land:443/tx?hash=0xBB26A27BC48122AC8B62BB70CD815D623B516CF933B7156157D162551E8D0BC5) |
+| *Legacy Prototype (Superseded)* | `gno.land/r/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthbounty/v0` | `1,374,813` | `94,047,145` | Superseded (`v1` active) | [`0xBB26A27B...8D0BC5`](https://rpc.onyx.testnets.gno.land:443/tx?hash=0xBB26A27BC48122AC8B62BB70CD815D623B516CF933B7156157D162551E8D0BC5) |
 
 - **Derived `hearthbounty/v1` Escrow Spender Address (`wugnot.Approve` target):** `g1dkvpnfcp8saevy2g46x9z2ljyj9saez6akm39a`
 - **Escrow Token Registry Key:** `gno.land/r/gnoland/wugnot.wugnot` (1:1 `ugnot`-backed Genesis wrapped GNOT)
@@ -85,7 +85,7 @@ gnokey query vm/qpkgmeta_json \
 The zero-install web playground hosted on GitHub Pages ([`https://alphonshhhomenicmtu.github.io/hearthbounty/`](https://alphonshhhomenicmtu.github.io/hearthbounty/)) lets judges verify every protocol mechanic in seconds:
 
 - **Adversarial Breaker Lab (`#/breaker`):** 1-click runnable exploit simulations for **H-1 Third-Party TopUp Theft**, **M-2 Unicode `U+0130` (`'İ'`) Tag Injection** (live v0 vs v1 diff), **Cross-Realm MITM / `uatom` / Dust Guard**, and **M-1 Hostage Timeout & Conflicted Arbiter**.
-- **Live Onyx Explorer (`#/onyx`):** Queries `https://rpc.onyx.testnets.gno.land:443` directly from the browser for block height, `vm/qpkgmeta_json`, confirmed deployment TX proofs, and live `ExportStatsJSON()` / `ExportBountiesJSON()` output.
+- **Live Onyx Explorer (`#/onyx`):** Queries `https://rpc.onyx.testnets.gno.land:443` directly from the browser for block height, `vm/qpkgmeta_json`, confirmed deployment TX proofs, live `ExportStatsJSON()` / `ExportBountiesJSON()` output, live `hearthguild/v0` preview, and an interactive **`vm/qrender` Live `Render(path)` Explorer** across both realms.
 - **Escrow Simulator (`#/`):** Mirrors all 14 `hearthbounty/v1` crossing entrypoints (`PostBounty`, `TopUpBounty`, `ClaimBounty`, `ReleaseExpiredClaim`, `SubmitProof`, `RequestRevision`, `ApproveAndSettle`, `ExpireSubmission`, `CancelBounty`, `OpenDispute`, `ResolveDispute`, `ExpireDispute`, `RegisterProfile`, `SetArbiter`) with live CEI balance invariant tracking.
 - **MCP Emulator (In-Browser, `#/mcp`):** Exercises all 12 `hearthbounty-mcp` tools over simulated state and tests the `gnoland-1` mainnet write block, while documenting the exact CLI command to run the live stdio MCP server in `mcp-server/` against Onyx.
 - **Automated `/diag` Self-Test (`#/diag`):** Runs 10 browser verification checks covering math conservation, H-1/M-1/M-2 regressions, MCP safety, and live Onyx RPC proofs.
@@ -146,17 +146,18 @@ flowchart LR
 │   ├── types.gno                                                      # Status, Category, Tier, ComputeSplit, EscapeMath
 │   ├── json.gno                                                       # Zero-reflection RFC-8259 JSON builder
 │   ├── visuals.gno                                                    # On-chain SVG hero chart, lifecycle strip, tier shields
-│   └── hearthcore_test.gno                                            # 8 unit tests
+│   └── hearthcore_test.gno                                            # 14 unit & boundary invariant tests
 ├── r/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthbounty/v1/        # Hardened 1:1 wugnot escrow realm
 │   ├── state.gno                                                      # Unexported AVL state, DonorShares, value-copy views
 │   ├── escrow.gno                                                     # 14 crossing entrypoints (grc20reg, H-1, M-1)
 │   ├── sanitize.gno                                                   # Byte-indexed ASCII NeutralizeGnoTags + HTTPS-only URL
 │   ├── query.gno                                                      # Read-only getters + 5 Export*JSON vm/qeval endpoints
 │   ├── render.gno                                                     # Paginated multi-route gnoweb UI + wugnot tx links
-│   └── hearthbounty_test.gno                                          # 7 integration & adversarial security tests
+│   ├── hearthbounty_test.gno                                          # 7 core lifecycle & H-1/M-1/M-2 regression tests
+│   └── adversarial_test.gno                                           # 11 adversarial security, conservation & Render() tests
 ├── r/g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4/hearthguild/v0/         # Companion consumer realm (import proof)
 │   ├── hearthguild.gno                                                # Imports hearthcore/v0 + hearthbounty/v1
-│   └── hearthguild_test.gno                                           # Consumer import & endorsement tests
+│   └── hearthguild_test.gno                                           # 5 consumer import, eligibility & XSS tests
 ├── mcp-server/                                                        # TypeScript MCP Server (12 tools) & hearth-cli
 ├── web/                                                               # Zero-install Playground, Breaker Lab & Onyx Explorer
 ├── docs/                                                              # 10-slide PDF pitch deck & gnoweb screenshots
@@ -186,6 +187,31 @@ flowchart LR
 
 ---
 
+## Test Coverage & Adversarial Invariants Matrix
+
+Every state transition, conservation property, timeout boundary, and `Render(path)` injection surface is backed by automated tests across the Gno VM, MCP server, and Web Playground (**65 CLI tests + 10 live browser `/diag` checks, 0 lint warnings**):
+
+| Suite | Command | Count | What Is Verified |
+|---|---|---:|---|
+| **`hearthcore/v0` (`/p/`)** | `gno test ./p/...` | **14 / 14** | `MaxInt64` overflow-free `ComputeSplit`, tier thresholds & 4.5+ quality gate, validation panic bounds, RFC-8259 control-char JSON escaping, XML-escaped SVG visuals across all 6 statuses |
+| **`hearthbounty/v1` (`/r/`)** | `gno test ./r/.../hearthbounty/v1` | **18 / 18** | Full lifecycle, H-1 donor refunds & wash blocks, M-1 review/dispute timeouts & arbiter conflict guards (both sponsor & claimant), double-claim & terminal-state replay guards, role ACL matrix, prime-amount 4-contributor exact conservation (`0..10000` bps), 20-donor cap & `MaxEscrowUgnot` ceiling, off-by-one timeout boundaries, cross-bounty credit isolation, multi-Unicode/XSS `Render()` matrix, 22-bounty pagination |
+| **`hearthguild/v0` (`/r/`)** | `gno test ./r/.../hearthguild/v0` | **5 / 5** | Cross-realm imports (`hearthcore/v0` + `hearthbounty/v1`), invalid/unregistered/self/duplicate endorsement blocks, live upstream settlement unlocking `CheckEligibility`, passport JSON & Unicode/XSS render guards |
+| **Gno Static Linter** | `gno lint ./p/... ./r/...` | **0 warnings** | Zero lint errors or warnings across all packages, realms, and adversarial tests |
+| **`hearthbounty-mcp` (TS)** | `cd mcp-server && npm test` | **12 / 12** | All 12 stdio MCP tools over in-memory MCP transport, mainnet write block (`gnoland-1` / `mainnet` / unknown), shell-injection quoting, HTTPS-only URLs, ABCI error surfacing, limit clamping |
+| **Web Playground & Onyx** | `cd web && npm test` | **16 / 16** | Exact TS mirror parity for every H-1/M-1/M-2/replay/conservation/boundary invariant, 4/4 Breaker Lab suites, live Onyx snapshot & `vm/qrender` client, 12-tool browser MCP emulator, `/diag` checks |
+
+| Security Invariant | Enforced Property | Primary Gno Test Proof |
+|---|---|---|
+| **Double-Claim & Replay Prevention** | Claimed/Submitted/Disputed/Settled/Cancelled bounties reject re-claims, double-settles, double-cancels, and double-resolves with zero balance drift. | `TestDoubleClaimAndTerminalStateReplayGuards` |
+| **Strict Role Access Control** | Non-sponsors cannot cancel/revise/settle; non-claimants cannot submit; non-parties cannot dispute; non-arbiters and conflicted arbiters (`arbiter == sponsor \|\| claimant`) cannot resolve. | `TestUnauthorizedAccessControlMatrix` |
+| **Exact Multi-Donor Conservation** | Across prime contributions (`100001 + 100003 + 100007 + 100009`) and `hunterBps` in `{0, 1, 333, 3333, 5000, 6667, 9999, 10000}`, `hunter + sponsor + sum(donors) == escrow` to the last `1 wugnot` and `EscrowBalance(realm) == totalEscrowUgnot`. | `TestMultiDonorProRataAccountingConservationTable`, `TestComputeSplitAdversarialBoundsAndPanics` |
+| **Zero / Negative / Overflow / Cap Guards** | Rejects `<= 0`, dust `< 100,000`, cumulative `> MaxEscrowUgnot (10^12)`, and `> 20` distinct external donors while allowing repeat top-ups from existing donors. | `TestSponsorSelfTopUpExternalDonorCapAndCeiling` |
+| **Exact Timeout Liveness Boundaries** | `ReleaseExpiredClaim`, `ExpireSubmission`, and `ExpireDispute` abort at `deadline - 1`, succeed at exact `deadline`, clear stale proofs, decrement `ClaimedCount`, and preserve unrated status on auto-settle. | `TestVoluntaryClaimReleaseAndReclaimPreservesDonorCustody`, `TestReviewAndDisputeTimeoutOffByOneBoundaries` |
+| **Cross-Bounty Credit Isolation** | Cancelling or partially refunding one bounty subtracts only that bounty's refunded share from `SponsoredUgnot`, preserving active credits on other bounties. | `TestCrossBountySponsoredCreditIsolation` |
+| **`Render(path)` Injection & Unicode Safety** | Multi-byte Unicode fold vectors (`İ`, `İİİ`, `ßİ`), mixed-case `<gNo-*>`, `$math`, Markdown `\|`/`#` breakouts, inline `<script>` slots, and non-HTTPS proof links are neutralized across every profile, bounty, proof, dispute, and 404 route. | `TestRenderXSSMarkdownAndUnicodeInjectionMatrix`, `TestGuildRenderXSSAndUnicodeNeutralization` |
+
+---
+
 ## Local Development & Verification
 
 ### Prerequisites
@@ -200,10 +226,10 @@ flowchart LR
 ```
 
 This runs:
-- `gno test -v ./p/... ./r/...` — **16/16 tests** (`8` `hearthcore/v0`, `7` `hearthbounty/v1`, `1` `hearthguild/v0`)
+- `gno test -v ./p/... ./r/...` — **37/37 tests** (`14` `hearthcore/v0`, `18` `hearthbounty/v1`, `5` `hearthguild/v0`)
 - `gno lint ./p/... ./r/...` — **0 errors, 0 warnings**
-- `cd mcp-server && npm test` — **5/5** TypeScript strict build & MCP wire-protocol tests (12 tools)
-- `cd web && npm test && npm run build` — **5/5** Playground, Breaker Lab, and `/diag` tests + Vite production build
+- `cd mcp-server && npm test` — **12/12** TypeScript strict build, security guard & MCP wire-protocol tests (12 tools)
+- `cd web && npm test && npm run build` — **16/16** Playground, Breaker Lab, Onyx RPC/`vm/qrender`, and `/diag` tests + Vite production build
 
 ### 2. Connect `hearthbounty-mcp` to Live Onyx (`onyx-1`)
 

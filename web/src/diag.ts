@@ -450,6 +450,7 @@ export async function runDiagnostics(options?: { skipLiveOnyx?: boolean }): Prom
           assertEq(snap.node.network, "onyx-1", "network chain_id");
           assertEq(snap.metas.core?.status, "live", "hearthcore/v0 live status");
           assertEq(snap.metas.v1?.status, "live", "hearthbounty/v1 live status");
+          assertEq(snap.metas.guild?.status, "live", "hearthguild/v0 live status");
           for (const art of ONYX_ARTIFACTS.filter((a) => !a.legacy)) {
             const tx = snap.txs[art.id];
             if (!tx?.verified || tx.height !== art.expectedBlockHeight) {

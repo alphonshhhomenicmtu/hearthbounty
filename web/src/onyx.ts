@@ -90,7 +90,7 @@ export const ONYX_ARTIFACTS: DeploymentArtifactSpec[] = [
     txHashBase64: "uyaie8SBIqyLYrtwzYFdYjtRbPkztxVhV9FiVR6NC8U=",
     txHashHex: "0xBB26A27BC48122AC8B62BB70CD815D623B516CF933B7156157D162551E8D0BC5",
     txRpcUrl: `${ONYX_RPC_URL}/tx?hash=0xBB26A27BC48122AC8B62BB70CD815D623B516CF933B7156157D162551E8D0BC5`,
-    note: "Superseded by hearthbounty/v1. Remains inert on Onyx because automated GPAO holds realms importing chain/banker for manual review.",
+    note: "Superseded by hearthbounty/v1. Initially held inert by automated GPAO due to chain/banker; hearthbounty/v1 replaces it with 1:1 wugnot escrow and H-1/M-1/M-2 security hardening.",
     legacy: true,
   },
 ];
@@ -291,6 +291,23 @@ export async function queryOnyxAbci(
   }
   const b64 = (base as { Data?: string | null; data?: string | null }).Data ?? (base as { data?: string | null }).data ?? "";
   return b64 ? base64ToUtf8(b64) : "";
+}
+
+export async function queryLiveRender(
+  pkgPath: string,
+  subPath = "",
+  rpcUrl = ONYX_RPC_URL,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ pkgPath: string; subPath: string; markdown: string; latencyMs: number }> {
+  const start = Date.now();
+  const cleanSub = subPath.trim().replace(/^\/+/, "");
+  const markdown = await queryOnyxAbci("vm/qrender", `${pkgPath}:${cleanSub}`, rpcUrl, fetchImpl);
+  return {
+    pkgPath,
+    subPath: cleanSub,
+    markdown,
+    latencyMs: Date.now() - start,
+  };
 }
 
 async function queryPkgMeta(

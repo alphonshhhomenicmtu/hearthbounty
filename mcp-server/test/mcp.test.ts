@@ -17,6 +17,8 @@ import {
   formatUgnotAsGnot,
   HearthConfig,
   HearthToolbox,
+  MAX_ESCROW_UGNOT,
+  shellQuote,
 } from "../src/tools.js";
 
 const SAMPLE_CONFIG: HearthConfig = {
@@ -321,4 +323,239 @@ test("HearthToolbox full mocked MCP workflow (status -> list -> claim -> https-o
 
   const rendered = await tools.renderPage("");
   assert.match(rendered.markdown, /# HearthBounty v1/);
+});
+
+test("assertWritableChain blocks mainnet variations, whitespace, and unrecognized chains", () => {
+  for (const bad of ["gnoland-1", " GNOLAND-1 ", "mainnet", "Mainnet", "", "   ", "cosmos-1"]) {
+    assert.throws(() => assertWritableChain(bad), /Safety block/, `expected block for ${JSON.stringify(bad)}`);
+  }
+  for (const good of ["dev", " DEV ", "onyx-1", "test18", "testnet-local"]) {
+    assert.doesNotThrow(() => assertWritableChain(good), `expected allow for ${JSON.stringify(good)}`);
+  }
+});
+
+test("preparePostBounty enforces title, spec, category, reward floor/ceiling, deadline bounds, and mainnet block", () => {
+  const rpc = new GnoRpcClient({ rpcUrl: SAMPLE_CONFIG.rpcUrl });
+  const tools = new HearthToolbox(rpc, SAMPLE_CONFIG);
+
+  assert.throws(
+    () =>
+      tools.preparePostBounty({
+        title: "abc",
+        spec: "Long enough specification text.",
+        category: "realm",
+        rewardUgnot: 500_000,
+      }),
+    /Title must be 4-120/,
+  );
+  assert.throws(
+    () =>
+      tools.preparePostBounty({
+        title: "Valid Title",
+        spec: "too short",
+        category: "realm",
+        rewardUgnot: 500_000,
+      }),
+    /Specification must be 10-4000/,
+  );
+  assert.throws(
+    () =>
+      tools.preparePostBounty({
+        title: "Valid Title",
+        spec: "Long enough specification text.",
+        category: "realm",
+        rewardUgnot: 99_999,
+      }),
+    /rewardUgnot must be an integer/,
+  );
+  assert.throws(
+    () =>
+      tools.preparePostBounty({
+        title: "Valid Title",
+        spec: "Long enough specification text.",
+        category: "realm",
+        rewardUgnot: MAX_ESCROW_UGNOT + 1,
+      }),
+    /rewardUgnot must be an integer/,
+  );
+  assert.throws(
+    () =>
+      tools.preparePostBounty({
+        title: "Valid Title",
+        spec: "Long enough specification text.",
+        category: "realm",
+        rewardUgnot: 500_000,
+        deadlineBlocks: 9,
+      }),
+    /deadlineBlocks must be between/,
+  );
+
+  const mainnetTools = new HearthToolbox(rpc, { ...SAMPLE_CONFIG, chainId: "gnoland-1" });
+  assert.throws(
+    () =>
+      mainnetTools.preparePostBounty({
+        title: "Mainnet Write Attempt",
+        spec: "Mainnet writes must always be refused.",
+        category: "audit",
+        rewardUgnot: 500_000,
+      }),
+    /Safety block/,
+  );
+});
+
+test("shellQuote neutralizes single quotes and shell metacharacters in gnokey commands", () => {
+  const hostile = `evil'; rm -rf /; $(whoami) \`id\``;
+  const quoted = shellQuote(hostile);
+  assert.equal(quoted, `'evil'\\''` + `; rm -rf /; $(whoami) \`id\`'`);
+  assert.ok(quoted.startsWith("'") && quoted.endsWith("'"));
+});
+
+test("prepareSubmitProof enforces HTTPS-only URLs, whitespace ban, digest/content requirement, and summary length", async () => {
+  const mockFetch = (async () =>
+    new Response(
+      JSON.stringify(
+        encodeQEvalString(
+          JSON.stringify({
+            found: true,
+            id: 2,
+            status: "claimed",
+            claimant: "g1agent000000000000000000000000000000000",
+          }),
+        ),
+      ),
+    )) as typeof fetch;
+  const tools = new HearthToolbox(new GnoRpcClient({ rpcUrl: SAMPLE_CONFIG.rpcUrl, fetchImpl: mockFetch }), SAMPLE_CONFIG);
+
+  for (const badUrl of [
+    "http://insecure.example.com/pr/1",
+    "javascript:alert(1)",
+    "https://a.b",
+    "https://github.com/org/repo/pull/1 injected",
+  ]) {
+    await assert.rejects(
+      () =>
+        tools.prepareSubmitProof({
+          id: 2,
+          proofURL: badUrl,
+          proofContent: "artifact",
+          summary: "Valid summary string.",
+        }),
+      /proofURL must be a valid https:\/\//,
+    );
+  }
+
+  await assert.rejects(
+    () =>
+      tools.prepareSubmitProof({
+        id: 2,
+        proofURL: "https://github.com/org/repo/pull/1",
+        summary: "Valid summary string.",
+      }),
+    /Provide either proofDigest/,
+  );
+
+  await assert.rejects(
+    () =>
+      tools.prepareSubmitProof({
+        id: 2,
+        proofURL: "https://github.com/org/repo/pull/1",
+        proofContent: "artifact",
+        summary: "short",
+      }),
+    /summary must be at least 6/,
+  );
+});
+
+test("Write-prep tools reject not-found bounties and mismatched lifecycle states", async () => {
+  const mockFetch = (async (input: RequestInfo | URL) => {
+    const parsed = new URL(String(input));
+    const decoded = Buffer.from((parsed.searchParams.get("data") ?? "").replace(/^0x/, ""), "hex").toString("utf8");
+    if (decoded.includes("ExportBountyJSON(99)")) {
+      return new Response(JSON.stringify(encodeQEvalString(JSON.stringify({ found: false }))));
+    }
+    return new Response(
+      JSON.stringify(
+        encodeQEvalString(
+          JSON.stringify({
+            found: true,
+            id: 1,
+            status: "settled",
+            escrow_ugnot: 0,
+            sponsor: "g1s",
+            claimant: "g1c",
+          }),
+        ),
+      ),
+    );
+  }) as typeof fetch;
+
+  const tools = new HearthToolbox(new GnoRpcClient({ rpcUrl: SAMPLE_CONFIG.rpcUrl, fetchImpl: mockFetch }), SAMPLE_CONFIG);
+
+  await assert.rejects(() => tools.prepareClaim({ id: 99, agentNote: "Missing" }), /was not found/);
+  await assert.rejects(() => tools.prepareClaim({ id: 1, agentNote: "Settled" }), /not "open"/);
+  await assert.rejects(() => tools.prepareSettle({ id: 1, rating: 5, reviewNote: "Settled" }), /expected "submitted"/);
+  await assert.rejects(() => tools.prepareSettle({ id: 1, rating: 0, reviewNote: "Bad rating" }), /between 1 and 5/);
+  await assert.rejects(() => tools.prepareExpireSubmission({ id: 1 }), /expected "submitted"/);
+  await assert.rejects(() => tools.prepareExpireDispute({ id: 1 }), /expected "disputed"/);
+});
+
+test("GnoRpcClient surfaces HTTP, RPC, ABCI, and malformed vm/qeval tuple errors cleanly", async () => {
+  assert.throws(() => decodeQEvalStringResult("(123 int)"), /Unexpected vm\/qeval string output/);
+
+  const http500 = new GnoRpcClient({
+    rpcUrl: "https://mock.local",
+    fetchImpl: (async () => new Response("err", { status: 500 })) as typeof fetch,
+  });
+  await assert.rejects(() => http500.getStatus(), /HTTP 500/);
+
+  const rpcErr = new GnoRpcClient({
+    rpcUrl: "https://mock.local",
+    fetchImpl: (async () => new Response(JSON.stringify({ error: { message: "boom" } }))) as typeof fetch,
+  });
+  await assert.rejects(() => rpcErr.abciQuery("vm/qeval", "x"), /ABCI RPC error.*boom/);
+
+  const abciErr = new GnoRpcClient({
+    rpcUrl: "https://mock.local",
+    fetchImpl: (async () =>
+      new Response(JSON.stringify({ result: { response: { ResponseBase: { Error: "vm panic", Log: "bounty not found" } } } }))) as typeof fetch,
+  });
+  await assert.rejects(() => abciErr.abciQuery("vm/qeval", "x"), /ABCI query failed.*bounty not found/);
+
+  const absentMeta = new GnoRpcClient({
+    rpcUrl: "https://mock.local",
+    fetchImpl: (async () =>
+      new Response(JSON.stringify({ result: { response: { ResponseBase: { Data: "" } } } }))) as typeof fetch,
+  });
+  const meta = await absentMeta.queryPackageMeta("gno.land/r/none/v0");
+  assert.equal(meta.status, "absent");
+});
+
+test("Read helpers enforce positive bounty IDs, non-empty profile addresses, and safe limit clamping", async () => {
+  const seenExprs: string[] = [];
+  const mockFetch = (async (input: RequestInfo | URL) => {
+    const parsed = new URL(String(input));
+    const decoded = Buffer.from((parsed.searchParams.get("data") ?? "").replace(/^0x/, ""), "hex").toString("utf8");
+    seenExprs.push(decoded);
+    if (decoded.includes("ExportLeaderboardJSON")) {
+      return new Response(JSON.stringify(encodeQEvalString(JSON.stringify({ count: 0, leaderboard: [] }))));
+    }
+    if (decoded.includes("ExportProfileJSON")) {
+      return new Response(JSON.stringify(encodeQEvalString(JSON.stringify({ found: true, handle: "smith" }))));
+    }
+    return new Response(JSON.stringify(encodeQEvalString(JSON.stringify({ chain_height: 1, count: 0, bounties: [] }))));
+  }) as typeof fetch;
+
+  const tools = new HearthToolbox(new GnoRpcClient({ rpcUrl: SAMPLE_CONFIG.rpcUrl, fetchImpl: mockFetch }), SAMPLE_CONFIG);
+
+  await assert.rejects(() => tools.getBounty(0), /positive integer/);
+  await assert.rejects(() => tools.getBounty(-2), /positive integer/);
+  await assert.rejects(() => tools.getProfile("   "), /Address is required/);
+
+  await tools.listBounties({ status: " OPEN ", minRewardUgnot: -50, limit: 999 });
+  await tools.getLeaderboard(0);
+  const prof = await tools.getProfile("g1x582angdzrqadgv4382j6y7ju6fj5wll6yuuq4");
+  assert.equal(prof.handle, "smith");
+
+  assert.ok(seenExprs.some((e) => e.includes(`ExportBountiesJSON("open", "", 0, 100)`)));
+  assert.ok(seenExprs.some((e) => e.includes(`ExportLeaderboardJSON(1)`)));
 });

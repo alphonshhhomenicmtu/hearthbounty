@@ -29,6 +29,7 @@ import {
   ONYX_RPC_URL,
   ONYX_SEEDED_TXS,
   OnyxSnapshot,
+  queryLiveRender,
 } from "./onyx.js";
 import { renderEscrowDistributionSVG, renderLifecycleSVG } from "./svg.js";
 
@@ -49,6 +50,12 @@ interface AppState {
   // Live Onyx RPC
   onyx: OnyxSnapshot | null;
   onyxLoading: boolean;
+  onyxRenderTarget: "v1" | "guild";
+  onyxRenderPath: string;
+  onyxRenderOutput: string | null;
+  onyxRenderLatencyMs: number;
+  onyxRenderLoading: boolean;
+  onyxRenderError: string | null;
   // MCP Emulator
   selectedTool: McpToolName;
   mcpChainId: string;
@@ -97,6 +104,12 @@ const state: AppState = {
   breakerResults: {},
   onyx: null,
   onyxLoading: false,
+  onyxRenderTarget: "v1",
+  onyxRenderPath: "",
+  onyxRenderOutput: null,
+  onyxRenderLatencyMs: 0,
+  onyxRenderLoading: false,
+  onyxRenderError: null,
   selectedTool: "hearth_list_bounties",
   mcpChainId: "onyx-1",
   mcpArgsText: JSON.stringify(MCP_TOOLS[1].defaultArgs, null, 2),
@@ -143,6 +156,33 @@ function setTab(tab: TabId): void {
   render();
   if (tab === "diag" && !state.diagReport && !state.diagRunning) {
     void triggerDiagnostics();
+  }
+}
+
+function safePrettyJson(raw: string): string {
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2);
+  } catch {
+    return raw;
+  }
+}
+
+async function runLiveOnyxRender(target: "v1" | "guild", subPath: string): Promise<void> {
+  state.onyxRenderTarget = target;
+  state.onyxRenderPath = subPath;
+  state.onyxRenderLoading = true;
+  state.onyxRenderError = null;
+  render();
+  try {
+    const pkgPath = target === "guild" ? GUILD_PKG_PATH : REALM_PKG_PATH;
+    const res = await queryLiveRender(pkgPath, subPath, ONYX_RPC_URL);
+    state.onyxRenderOutput = res.markdown;
+    state.onyxRenderLatencyMs = res.latencyMs;
+  } catch (err) {
+    state.onyxRenderError = err instanceof Error ? err.message : String(err);
+  } finally {
+    state.onyxRenderLoading = false;
+    render();
   }
 }
 
@@ -252,7 +292,7 @@ function renderBreakerLabView(): string {
         </div>
       </div>
       <div class="callout" style="margin:0;">
-        <strong>Audit Coverage:</strong> Every breaker test below has a matching Gno VM unit test in <span class="mono">r/.../hearthbounty/v1/hearthbounty_test.gno</span> verified by <span class="mono">gno test</span> (16/16 passing) and <span class="mono">gno lint</span> (0 warnings).
+        <strong>Audit Coverage:</strong> Every breaker test below has matching Gno VM regression &amp; invariant tests in <span class="mono">hearthbounty_test.gno</span> and <span class="mono">adversarial_test.gno</span> verified by <span class="mono">gno test</span> (37/37 passing) and <span class="mono">gno lint</span> (0 warnings).
       </div>
     </section>
 
@@ -869,7 +909,7 @@ function renderOnyxView(): string {
               meta?.raw
                 ? `<div class="kv-item">
                     <div class="kv-label">Live vm/qpkgmeta_json Response</div>
-                    <pre class="code-block" style="margin-top:6px;max-height:130px;">${esc(JSON.stringify(JSON.parse(meta.raw), null, 2))}</pre>
+                    <pre class="code-block" style="margin-top:6px;max-height:130px;">${esc(safePrettyJson(meta.raw))}</pre>
                   </div>`
                 : ""
             }
@@ -926,7 +966,56 @@ function renderOnyxView(): string {
           ? `<div style="margin-top:10px;"><strong>Live Onyx <span class="mono">hearthbounty/v1.ExportBountiesJSON()</span>:</strong><pre class="code-block" style="margin-top:6px;">${esc(JSON.stringify(snap.liveV1Bounties, null, 2))}</pre></div>`
           : ""
       }
+      ${
+        snap?.liveGuildRenderPreview
+          ? `<div style="margin-top:10px;"><strong>Live Onyx <span class="mono">hearthguild/v0.Render("")</span> Consumer Realm Preview:</strong><pre class="code-block" style="margin-top:6px;max-height:200px;">${esc(snap.liveGuildRenderPreview)}</pre></div>`
+          : ""
+      }
     </div>
+
+    <section class="panel" style="margin-bottom:16px;border-color:rgba(56,189,248,0.4);">
+      <div class="panel-header">
+        <div>
+          <h3 class="panel-title">Interactive Live Onyx <span class="mono">Render(path)</span> Explorer (<span class="mono">vm/qrender</span>)</h3>
+          <p class="panel-sub">Query live gnoweb Markdown directly from <span class="mono">${esc(ONYX_RPC_URL)}</span> for any <span class="mono">hearthbounty/v1</span> or <span class="mono">hearthguild/v0</span> route.</p>
+        </div>
+        ${
+          state.onyxRenderOutput !== null
+            ? `<span class="badge badge-pass">LIVE vm/qrender · ${state.onyxRenderLatencyMs}ms</span>`
+            : `<span class="badge badge-claimed">DIRECT ONYX ABCI</span>`
+        }
+      </div>
+
+      <div class="filter-row" style="margin-bottom:10px;">
+        <button class="chip ${state.onyxRenderTarget === "v1" && state.onyxRenderPath === "" ? "active" : ""}" data-onyx-preset="v1:">v1: Home ("")</button>
+        <button class="chip ${state.onyxRenderTarget === "v1" && state.onyxRenderPath === "bounty/1" ? "active" : ""}" data-onyx-preset="v1:bounty/1">v1: bounty/1 (Settled)</button>
+        <button class="chip ${state.onyxRenderTarget === "v1" && state.onyxRenderPath === "bounty/2" ? "active" : ""}" data-onyx-preset="v1:bounty/2">v1: bounty/2 (Submitted)</button>
+        <button class="chip ${state.onyxRenderTarget === "v1" && state.onyxRenderPath === "bounty/3" ? "active" : ""}" data-onyx-preset="v1:bounty/3">v1: bounty/3 (Open)</button>
+        <button class="chip ${state.onyxRenderTarget === "v1" && state.onyxRenderPath === "leaderboard" ? "active" : ""}" data-onyx-preset="v1:leaderboard">v1: leaderboard</button>
+        <button class="chip ${state.onyxRenderTarget === "v1" && state.onyxRenderPath === "agents" ? "active" : ""}" data-onyx-preset="v1:agents">v1: agents</button>
+        <button class="chip ${state.onyxRenderTarget === "guild" && state.onyxRenderPath === "" ? "active" : ""}" data-onyx-preset="guild:">guild: Home ("")</button>
+        <button class="chip ${state.onyxRenderTarget === "guild" && state.onyxRenderPath.startsWith("passport/") ? "active" : ""}" data-onyx-preset="guild:passport/g1ynlurnj04nwdk9g9e5tgn2t7c2v3v2zra7rrv8">guild: AI Agent Passport</button>
+      </div>
+
+      <form id="form-onyx-render" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">
+        <select name="target" class="select" style="width:auto;min-width:190px;" aria-label="Target live Onyx realm">
+          <option value="v1" ${state.onyxRenderTarget === "v1" ? "selected" : ""}>hearthbounty/v1</option>
+          <option value="guild" ${state.onyxRenderTarget === "guild" ? "selected" : ""}>hearthguild/v0</option>
+        </select>
+        <input name="subPath" class="input mono" style="flex:1;min-width:220px;" placeholder="Route subpath (e.g. '', 'bounty/2', 'leaderboard', 'passport/g1...')" value="${esc(state.onyxRenderPath)}" />
+        <button type="submit" class="btn btn-primary btn-sm">
+          ${state.onyxRenderLoading ? "Querying vm/qrender..." : "Query Live Render()"}
+        </button>
+      </form>
+
+      ${
+        state.onyxRenderError
+          ? `<div class="toast err">${esc(state.onyxRenderError)}</div>`
+          : state.onyxRenderOutput !== null
+            ? `<pre class="code-block" style="max-height:320px;">${esc(state.onyxRenderOutput)}</pre>`
+            : `<div class="callout" style="margin:0;">Select any route chip above or enter a custom subpath to stream live <span class="mono">Render(path)</span> Markdown straight from Onyx (<span class="mono">onyx-1</span>).</div>`
+      }
+    </section>
 
     <section class="panel">
       <div class="panel-header">
@@ -1157,7 +1246,7 @@ function renderLeaderboardView(): string {
         <div class="panel-header">
           <div>
             <h3 class="panel-title">7 Hardened V2.1 Protocol Invariants</h3>
-            <p class="panel-sub">Verified across 16/16 gno test cases and 0 gno lint warnings.</p>
+            <p class="panel-sub">Verified across 37/37 gno test cases, 12/12 MCP tests, 16/16 Web tests, and 0 gno lint warnings.</p>
           </div>
           <button class="btn btn-primary btn-sm" data-action="goto-breaker">Test in Breaker Lab</button>
         </div>
@@ -1238,9 +1327,9 @@ function renderDiagView(): string {
                 <div class="kpi-meta"><span class="mono">${esc(rep.ranAt.slice(11, 19))} UTC</span></div>
               </div>
               <div class="kpi-card">
-                <div class="kpi-label">Gno &amp; MCP Repo Suite</div>
-                <div class="kpi-value text-emerald">21 / 21</div>
-                <div class="kpi-meta"><span>16 gno test · 0 lint · 5 MCP tests</span></div>
+                <div class="kpi-label">Gno, MCP &amp; Web Suite</div>
+                <div class="kpi-value text-emerald">65 / 65</div>
+                <div class="kpi-meta"><span>37 gno · 0 lint · 12 MCP · 16 web</span></div>
               </div>
               <div class="kpi-card">
                 <div class="kpi-label">Onyx Active Deployments</div>
@@ -1496,6 +1585,24 @@ function bindEvents(): void {
       state.selectedBountyId = Number(el.dataset.bountyId);
       render();
     });
+  });
+
+  document.querySelectorAll<HTMLElement>("[data-onyx-preset]").forEach((el) => {
+    el.addEventListener("click", () => {
+      const spec = el.dataset.onyxPreset ?? "v1:";
+      const idx = spec.indexOf(":");
+      const target = (idx === -1 ? "v1" : spec.slice(0, idx)) as "v1" | "guild";
+      const subPath = idx === -1 ? "" : spec.slice(idx + 1);
+      void runLiveOnyxRender(target, subPath);
+    });
+  });
+
+  document.getElementById("form-onyx-render")?.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const fd = new FormData(ev.currentTarget as HTMLFormElement);
+    const target = (String(fd.get("target") ?? "v1") === "guild" ? "guild" : "v1") as "v1" | "guild";
+    const subPath = String(fd.get("subPath") ?? "");
+    void runLiveOnyxRender(target, subPath);
   });
 
   document.querySelectorAll<HTMLElement>("[data-breaker]").forEach((el) => {
