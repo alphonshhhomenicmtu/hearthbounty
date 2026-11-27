@@ -4,10 +4,10 @@
 
 HearthBounty is a Gno.land v1.8.0 micro-bounty protocol composed of three on-chain modules plus a TypeScript MCP bridge:
 
-1. **`hearthcore/v0` (`/p/`)** — Reusable pure Gno package providing overflow-safe integer basis-point splits (`ComputeSplit`), reputation tier evaluation (`ComputeTier`), zero-reflection RFC-8259 JSON encoding, and deterministic on-chain SVG visuals (`p/nt/svg/v0`).
-2. **`hearthbounty/v1` (`/r/`)** — Hardened stateful escrow realm settling in official Genesis 1:1 `ugnot`-backed **`wugnot`** via non-crossing `gno.land/r/nt/grc20reg/v0` `RealmTeller` transfers (zero `chain/banker` and zero `chain/runtime/unsafe` imports across production code). Renders a paginated multi-route `gnoweb` UI (`p/nt/mux/v0`) and exposes 5 deterministic `vm/qeval` JSON query endpoints.
-3. **`hearthguild/v0` (`/r/`)** — Composable companion consumer realm importing both `hearthcore/v0` and `hearthbounty/v1` to provide on-chain builder passports, peer skill endorsements, and DAO/grant eligibility gates (`CheckEligibility`).
-4. **`hearthbounty-mcp`** — TypeScript Model Context Protocol (MCP) server (12 stdio tools + `hearth-cli`) speaking Tendermint ABCI JSON-RPC alongside [`gnomcp`](https://mcp.gno.dev), with permanent mainnet (`gnoland-1`) write blocking.
+1. **`hearthcore/v0` (`/p/`)**: reusable pure Gno package with overflow-safe integer basis-point splits (`ComputeSplit`), reputation tier evaluation (`ComputeTier`), zero-reflection RFC-8259 JSON encoding, and deterministic on-chain SVG visuals (`p/nt/svg/v0`).
+2. **`hearthbounty/v1` (`/r/`)**: stateful escrow realm settling in official Genesis 1:1 `ugnot`-backed **`wugnot`** via non-crossing `gno.land/r/nt/grc20reg/v0` `RealmTeller` transfers (zero `chain/banker` and zero `chain/runtime/unsafe` imports across production code). Renders a paginated multi-route `gnoweb` UI (`p/nt/mux/v0`) and exposes 5 deterministic `vm/qeval` JSON query endpoints.
+3. **`hearthguild/v0` (`/r/`)**: companion consumer realm importing both `hearthcore/v0` and `hearthbounty/v1` for on-chain builder passports, peer skill endorsements, and DAO/grant eligibility gates (`CheckEligibility`).
+4. **`hearthbounty-mcp`**: TypeScript Model Context Protocol (MCP) server (12 stdio tools + `hearth-cli`) speaking Tendermint ABCI JSON-RPC alongside [`gnomcp`](https://mcp.gno.dev), with permanent mainnet (`gnoland-1`) write blocking.
 
 **Arbiter Trust Model & Liveness Guarantee:** Disputed submissions route to a rotatable arbiter (`SetArbiter`) who is prevented on-chain from resolving any bounty they are a party to (`caller == sponsor || caller == claimant`). If a sponsor ignores a submitted proof or the arbiter fails to act, permissionless `ExpireSubmission` (100% payout to claimant after `ReviewDeadlineHeight`) and `ExpireDispute` (50/50 pro-rata split after `DisputeDeadlineHeight`) prevent escrowed funds from ever freezing.
 
@@ -31,7 +31,7 @@ Every finding from red-team review and live Onyx GPAO forensics was fixed and pr
 | **H-1 (High): Third-Party TopUp Theft** | `CancelBounty` refunded entire `EscrowUgnot` (including third-party top-ups) back to `b.Sponsor`, and allowed active claimants/donors to wash `EarnedUgnot` / `SponsoredUgnot`. | Per-contributor AVL `DonorShares` ledger tracks `SponsorFundedUgnot` separately from external donors (`MinTopUpUgnot = 100,000`, `MaxExternalDonors = 20`). `CancelBounty` refunds each contributor directly; dispute splits refund pro-rata; refunded `SponsoredUgnot` credits decrement; donor self-claim and claimant self-top-up abort. | `TestCancelRefundsThirdPartyDonorsWithoutSponsorTheft`, `TestClaimantCannotWashTopUpIntoEarned` |
 | **M-1 (Medium): Unbounded Hostage Escrow & Conflicted Arbiter** | Submitted proofs had no review timeout, disputes had no expiry fallback, and an arbiter who was sponsor/claimant could self-settle. | Added `ReviewDeadlineHeight` + permissionless `ExpireSubmission` (100% claimant payout), `DisputeDeadlineHeight` + permissionless `ExpireDispute` (50/50 pro-rata split), and conflict guard rejecting `caller == b.Sponsor || caller == b.Claimant` in `ResolveDispute`. | `TestSubmissionReviewTimeoutAutoSettle`, `TestDisputeSplitConflictGuardAndTimeoutFallback` |
 | **M-2 (Medium): Unicode Tag-Neutralizer Bypass** | `strings.ToLower` expands Turkish `'İ'` (`U+0130`) from 2 bytes to 3 bytes (`"i\u0307"`), shifting byte offsets so `İ<gno-form ...>` bypassed neutralization. | `NeutralizeGnoTags` in `sanitize.gno` performs direct byte-indexed ASCII case folding on the original string without `strings.ToLower`. `ValidateProofURL` restricts links strictly to `https://`. | `TestUnicodeNeutralizeGnoTagsAndSecurityGuards` |
-| **Onyx `inert` Blocker (`chain/banker`)** | Automated Onyx GPAO (`g1yaee4f...`) holds realms importing `chain/banker` indefinitely in `status: "inert"` for manual review. | Switched escrow rail to official Genesis 1:1 `ugnot`-backed **`wugnot`** (`gno.land/r/gnoland/wugnot.wugnot`) via non-crossing `gno.land/r/nt/grc20reg/v0` `RealmTeller` transfers — zero `chain/banker` and zero `chain/runtime/unsafe` imports across all production code. | `gpao verify-one` exit 0 + live Onyx deployment |
+| **Onyx `inert` Blocker (`chain/banker`)** | Automated Onyx GPAO (`g1yaee4f...`) holds realms importing `chain/banker` indefinitely in `status: "inert"` for manual review. | Switched escrow rail to official Genesis 1:1 `ugnot`-backed **`wugnot`** (`gno.land/r/gnoland/wugnot.wugnot`) via non-crossing `gno.land/r/nt/grc20reg/v0` `RealmTeller` transfers. Zero `chain/banker` and zero `chain/runtime/unsafe` imports across all production code. | `gpao verify-one` exit 0 + live Onyx deployment |
 
 ---
 
@@ -65,7 +65,7 @@ Deployed on **Onyx (`onyx-1`)** (`https://rpc.onyx.testnets.gno.land:443`) under
 | 9 | Post Bounty #2 (`3.50 GNOT`, Security Audit track) | `PostBounty` | `1,380,081` | [`0xCCCF3879...B2EF2C`](https://rpc.onyx.testnets.gno.land:443/tx?hash=0xCCCF3879482425A60A76407D374D85BEC2D410F5743D5678751217738AB2EF2C) |
 | 10 | Claim Bounty #2 (`anvil-onyx-agent`) | `ClaimBounty` | `1,380,082` | [`0xB047F67D...D2D708`](https://rpc.onyx.testnets.gno.land:443/tx?hash=0xB047F67DD93D75B7ACBC7AD3B9B9BBA6BEC02825CFAD10C0979E324AB3D2D708) |
 | 11 | Submit Proof #2 (remains **Submitted** for live inspection) | `SubmitProof` | `1,380,084` | [`0x7B69C841...277CC4`](https://rpc.onyx.testnets.gno.land:443/tx?hash=0x7B69C8415C8F9084E63630AF2BDBCC4BB01FC548B140A91C474EA12DAA277CC4) |
-| 12 | Post Bounty #3 (`2.50 GNOT`, AI Agents track — **Open**) | `PostBounty` | `1,380,085` | [`0x0A08B7CC...BBE0D9`](https://rpc.onyx.testnets.gno.land:443/tx?hash=0x0A08B7CCFB78C527F71F7EFD04B1F64E7991A55218CC177CED4BB911CEBBE0D9) |
+| 12 | Post Bounty #3 (`2.50 GNOT`, AI Agents track, **Open**) | `PostBounty` | `1,380,085` | [`0x0A08B7CC...BBE0D9`](https://rpc.onyx.testnets.gno.land:443/tx?hash=0x0A08B7CCFB78C527F71F7EFD04B1F64E7991A55218CC177CED4BB911CEBBE0D9) |
 
 ```bash
 # Verify live package status directly on Onyx RPC
@@ -82,7 +82,7 @@ gnokey query vm/qpkgmeta_json \
 
 ## Interactive Web Playground & Adversarial Breaker Lab
 
-The zero-install web playground hosted on GitHub Pages ([`https://alphonshhhomenicmtu.github.io/hearthbounty/`](https://alphonshhhomenicmtu.github.io/hearthbounty/)) lets judges verify every protocol mechanic in seconds:
+The zero-install web playground on GitHub Pages ([`https://alphonshhhomenicmtu.github.io/hearthbounty/`](https://alphonshhhomenicmtu.github.io/hearthbounty/)) runs the same protocol checks in the browser:
 
 - **Adversarial Breaker Lab (`#/breaker`):** 1-click runnable exploit simulations for **H-1 Third-Party TopUp Theft**, **M-2 Unicode `U+0130` (`'İ'`) Tag Injection** (live v0 vs v1 diff), **Cross-Realm MITM / `uatom` / Dust Guard**, and **M-1 Hostage Timeout & Conflicted Arbiter**.
 - **Live Onyx Explorer (`#/onyx`):** Queries `https://rpc.onyx.testnets.gno.land:443` directly from the browser for block height, `vm/qpkgmeta_json`, confirmed deployment TX proofs, live `ExportStatsJSON()` / `ExportBountiesJSON()` output, live `hearthguild/v0` preview, and an interactive **`vm/qrender` Live `Render(path)` Explorer** across both realms.
@@ -226,10 +226,10 @@ Every state transition, conservation property, timeout boundary, and `Render(pat
 ```
 
 This runs:
-- `gno test -v ./p/... ./r/...` — **37/37 tests** (`14` `hearthcore/v0`, `18` `hearthbounty/v1`, `5` `hearthguild/v0`)
-- `gno lint ./p/... ./r/...` — **0 errors, 0 warnings**
-- `cd mcp-server && npm test` — **12/12** TypeScript strict build, security guard & MCP wire-protocol tests (12 tools)
-- `cd web && npm test && npm run build` — **16/16** Playground, Breaker Lab, Onyx RPC/`vm/qrender`, and `/diag` tests + Vite production build
+- `gno test -v ./p/... ./r/...`: **37/37 tests** (`14` `hearthcore/v0`, `18` `hearthbounty/v1`, `5` `hearthguild/v0`)
+- `gno lint ./p/... ./r/...`: **0 errors, 0 warnings**
+- `cd mcp-server && npm test`: **12/12** TypeScript strict build, security guard and MCP wire-protocol tests (12 tools)
+- `cd web && npm test && npm run build`: **16/16** Playground, Breaker Lab, Onyx RPC/`vm/qrender`, and `/diag` tests + Vite production build
 
 ### 2. Connect `hearthbounty-mcp` to Live Onyx (`onyx-1`)
 
